@@ -1,0 +1,27 @@
+name: parcel_scanner
+description: Parcel label scanner, QR generator, and HPRT printer
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_mlkit_text_recognition: ^0.13.0
+  camera: ^0.10.5+9
+  qr_flutter: ^4.1.0
+  flutter_bluetooth_serial: ^0.4.0
+  shared_preferences: ^2.2.2
+  permission_handler: ^11.3.0
+  path_provider: ^2.1.2
+  screenshot: ^2.3.0
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
