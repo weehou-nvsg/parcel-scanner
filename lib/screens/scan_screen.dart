@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/ocr_service.dart';
+import '../services/gemini_service.dart';
 import '../models/parcel_data.dart';
 import 'review_screen.dart';
 
@@ -49,21 +50,59 @@ class _ScanScreenState extends State<ScanScreen> {
 
     setState(() {
       _isProcessing = true;
-      _status = 'Processing label...';
+      _status = 'Capturing...';
     });
 
     try {
       final file = await _controller!.takePicture();
-      final result = await _ocr.processImage(file.path);
+      final geminiKey = widget.prefs.getString('gemini_api_key') ?? '';
+      final prefix = widget.prefs.getString('prefix') ?? '';
+
+      String trackingNumber = '';
+      String cartonCurrent = '';
+      String cartonTotal = '';
+      List<String> addressLines = [];
+      String rawText = '';
+
+      if (geminiKey.isNotEmpty) {
+        // Use Gemini Vision AI to intelligently identify TID and other fields
+        setState(() => _status = 'Analysing with Gemini AI...');
+        try {
+          final gemini = GeminiService(geminiKey);
+          final result = await gemini.analyzeLabel(file.path);
+          trackingNumber = result.trackingNumber;
+          cartonCurrent = result.cartonCurrent;
+          cartonTotal = result.cartonTotal;
+          addressLines = result.addressLines;
+          rawText = result.rawResponse;
+        } catch (e) {
+          // Gemini failed — fall back to ML Kit
+          setState(() => _status = 'Gemini failed, using OCR fallback...');
+          final result = await _ocr.processImage(file.path);
+          trackingNumber = result.trackingNumber;
+          cartonCurrent = result.cartonCurrent;
+          cartonTotal = result.cartonTotal;
+          addressLines = result.addressLines;
+          rawText = result.rawText;
+        }
+      } else {
+        // No Gemini key — use on-device ML Kit OCR
+        setState(() => _status = 'Reading label...');
+        final result = await _ocr.processImage(file.path);
+        trackingNumber = result.trackingNumber;
+        cartonCurrent = result.cartonCurrent;
+        cartonTotal = result.cartonTotal;
+        addressLines = result.addressLines;
+        rawText = result.rawText;
+      }
 
       if (!mounted) return;
 
-      final prefix = widget.prefs.getString('prefix') ?? '';
       final parcel = ParcelData(
-        trackingNumber: result.trackingNumber,
-        cartonCurrent: result.cartonCurrent,
-        cartonTotal: result.cartonTotal,
-        addressLines: result.addressLines,
+        trackingNumber: trackingNumber,
+        cartonCurrent: cartonCurrent,
+        cartonTotal: cartonTotal,
+        addressLines: addressLines,
         prefix: prefix,
       );
 
@@ -72,7 +111,7 @@ class _ScanScreenState extends State<ScanScreen> {
         MaterialPageRoute(
           builder: (_) => ReviewScreen(
             parcel: parcel,
-            rawText: result.rawText,
+            rawText: rawText,
             imagePath: file.path,
             prefs: widget.prefs,
           ),
@@ -95,6 +134,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final geminiKey = widget.prefs.getString('gemini_api_key') ?? '';
     return Scaffold(
       appBar: AppBar(title: const Text('Scan Label')),
       backgroundColor: Colors.black,
@@ -106,16 +146,35 @@ class _ScanScreenState extends State<ScanScreen> {
             Center(
               child: Text(_status, style: const TextStyle(color: Colors.white)),
             ),
-          // Overlay frame guide
           if (_controller != null && _controller!.value.isInitialized)
-            Positioned.fill(
-              child: CustomPaint(painter: _FramePainter()),
+            Positioned.fill(child: CustomPaint(painter: _FramePainter())),
+          // AI badge
+          Positioned(
+            top: 12,
+            right: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: geminiKey.isNotEmpty ? Colors.blue.withOpacity(0.85) : Colors.grey.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(geminiKey.isNotEmpty ? Icons.auto_awesome : Icons.text_fields,
+                      color: Colors.white, size: 14),
+                  const SizedBox(width: 4),
+                  Text(
+                    geminiKey.isNotEmpty ? 'Gemini AI' : 'OCR only',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
+          ),
           // Status + button at bottom
           Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
+            bottom: 0, left: 0, right: 0,
             child: Container(
               color: Colors.black54,
               padding: const EdgeInsets.all(20),
@@ -123,7 +182,7 @@ class _ScanScreenState extends State<ScanScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    _isProcessing ? 'Processing...' : _status,
+                    _isProcessing ? _status : 'Point at label and tap to scan',
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                     textAlign: TextAlign.center,
                   ),
@@ -132,8 +191,7 @@ class _ScanScreenState extends State<ScanScreen> {
                     GestureDetector(
                       onTap: _captureAndProcess,
                       child: Container(
-                        width: 72,
-                        height: 72,
+                        width: 72, height: 72,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 4),
@@ -164,24 +222,19 @@ class _FramePainter extends CustomPainter {
 
     final margin = size.width * 0.08;
     final rect = Rect.fromLTWH(
-      margin,
-      size.height * 0.2,
-      size.width - margin * 2,
-      size.height * 0.45,
+      margin, size.height * 0.2,
+      size.width - margin * 2, size.height * 0.45,
     );
 
     const cornerLen = 28.0;
-    // Draw corner brackets
     for (final corner in [
       [rect.left, rect.top, 1.0, 1.0],
       [rect.right, rect.top, -1.0, 1.0],
       [rect.left, rect.bottom, 1.0, -1.0],
       [rect.right, rect.bottom, -1.0, -1.0],
     ]) {
-      final x = corner[0];
-      final y = corner[1];
-      final dx = corner[2];
-      final dy = corner[3];
+      final x = corner[0]; final y = corner[1];
+      final dx = corner[2]; final dy = corner[3];
       canvas.drawLine(Offset(x, y), Offset(x + dx * cornerLen, y), paint);
       canvas.drawLine(Offset(x, y), Offset(x, y + dy * cornerLen), paint);
     }

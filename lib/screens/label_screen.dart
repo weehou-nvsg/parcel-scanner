@@ -59,7 +59,7 @@ class _LabelScreenState extends State<LabelScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-              'No paired Bluetooth devices found. Pair your HPRT HM-T3 Pro in Android Bluetooth settings first.'),
+              'No paired Bluetooth devices found. Pair your printer in Android Bluetooth settings first, then return here.'),
         ),
       );
       return;
@@ -178,7 +178,7 @@ class _LabelScreenState extends State<LabelScreen> {
                                 height: 16,
                                 child: CircularProgressIndicator(strokeWidth: 2))
                             : const Icon(Icons.bluetooth_searching),
-                        label: const Text('Select HPRT Printer'),
+                        label: const Text('Select Bluetooth Printer'),
                         onPressed: _loadingDevices ? null : _showPrinterPicker,
                       ),
                     ),
