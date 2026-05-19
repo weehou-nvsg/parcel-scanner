@@ -1,10 +1,10 @@
-import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/ocr_service.dart';
 import '../services/gemini_service.dart';
+import '../services/claude_service.dart';
 import '../models/parcel_data.dart';
 import 'review_screen.dart';
 
@@ -55,7 +55,9 @@ class _ScanScreenState extends State<ScanScreen> {
 
     try {
       final file = await _controller!.takePicture();
+      final selectedAi = widget.prefs.getString('selected_ai') ?? 'ocr';
       final geminiKey = widget.prefs.getString('gemini_api_key') ?? '';
+      final claudeKey = widget.prefs.getString('claude_api_key') ?? '';
       final prefix = widget.prefs.getString('prefix') ?? '';
 
       String trackingNumber = '';
@@ -64,20 +66,35 @@ class _ScanScreenState extends State<ScanScreen> {
       List<String> addressLines = [];
       String rawText = '';
 
-      if (geminiKey.isNotEmpty) {
-        // Use Gemini Vision AI to intelligently identify TID and other fields
+      if (selectedAi == 'gemini' && geminiKey.isNotEmpty) {
         setState(() => _status = 'Analysing with Gemini AI...');
         try {
-          final gemini = GeminiService(geminiKey);
-          final result = await gemini.analyzeLabel(file.path);
+          final result = await GeminiService(geminiKey).analyzeLabel(file.path);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;
           cartonTotal = result.cartonTotal;
           addressLines = result.addressLines;
           rawText = result.rawResponse;
-        } catch (e) {
-          // Gemini failed — fall back to ML Kit
-          setState(() => _status = 'Gemini failed, using OCR fallback...');
+        } catch (_) {
+          setState(() => _status = 'Gemini failed, falling back to OCR...');
+          final result = await _ocr.processImage(file.path);
+          trackingNumber = result.trackingNumber;
+          cartonCurrent = result.cartonCurrent;
+          cartonTotal = result.cartonTotal;
+          addressLines = result.addressLines;
+          rawText = result.rawText;
+        }
+      } else if (selectedAi == 'claude' && claudeKey.isNotEmpty) {
+        setState(() => _status = 'Analysing with Claude AI...');
+        try {
+          final result = await ClaudeService(claudeKey).analyzeLabel(file.path);
+          trackingNumber = result.trackingNumber;
+          cartonCurrent = result.cartonCurrent;
+          cartonTotal = result.cartonTotal;
+          addressLines = result.addressLines;
+          rawText = result.rawResponse;
+        } catch (_) {
+          setState(() => _status = 'Claude failed, falling back to OCR...');
           final result = await _ocr.processImage(file.path);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;
@@ -86,7 +103,6 @@ class _ScanScreenState extends State<ScanScreen> {
           rawText = result.rawText;
         }
       } else {
-        // No Gemini key — use on-device ML Kit OCR
         setState(() => _status = 'Reading label...');
         final result = await _ocr.processImage(file.path);
         trackingNumber = result.trackingNumber;
@@ -98,19 +114,17 @@ class _ScanScreenState extends State<ScanScreen> {
 
       if (!mounted) return;
 
-      final parcel = ParcelData(
-        trackingNumber: trackingNumber,
-        cartonCurrent: cartonCurrent,
-        cartonTotal: cartonTotal,
-        addressLines: addressLines,
-        prefix: prefix,
-      );
-
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => ReviewScreen(
-            parcel: parcel,
+            parcel: ParcelData(
+              trackingNumber: trackingNumber,
+              cartonCurrent: cartonCurrent,
+              cartonTotal: cartonTotal,
+              addressLines: addressLines,
+              prefix: prefix,
+            ),
             rawText: rawText,
             imagePath: file.path,
             prefs: widget.prefs,
@@ -125,6 +139,29 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
+  String get _aiBadgeLabel {
+    final selected = widget.prefs.getString('selected_ai') ?? 'ocr';
+    switch (selected) {
+      case 'gemini': return 'Gemini AI';
+      case 'claude': return 'Claude AI';
+      default: return 'OCR only';
+    }
+  }
+
+  IconData get _aiBadgeIcon {
+    final selected = widget.prefs.getString('selected_ai') ?? 'ocr';
+    switch (selected) {
+      case 'gemini': return Icons.auto_awesome;
+      case 'claude': return Icons.psychology;
+      default: return Icons.text_fields;
+    }
+  }
+
+  bool get _aiActive {
+    final selected = widget.prefs.getString('selected_ai') ?? 'ocr';
+    return selected != 'ocr';
+  }
+
   @override
   void dispose() {
     _controller?.dispose();
@@ -134,7 +171,6 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final geminiKey = widget.prefs.getString('gemini_api_key') ?? '';
     return Scaffold(
       appBar: AppBar(title: const Text('Scan Label')),
       backgroundColor: Colors.black,
@@ -143,36 +179,32 @@ class _ScanScreenState extends State<ScanScreen> {
           if (_controller != null && _controller!.value.isInitialized)
             Positioned.fill(child: CameraPreview(_controller!))
           else
-            Center(
-              child: Text(_status, style: const TextStyle(color: Colors.white)),
-            ),
+            Center(child: Text(_status, style: const TextStyle(color: Colors.white))),
           if (_controller != null && _controller!.value.isInitialized)
             Positioned.fill(child: CustomPaint(painter: _FramePainter())),
           // AI badge
           Positioned(
-            top: 12,
-            right: 12,
+            top: 12, right: 12,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: geminiKey.isNotEmpty ? Colors.blue.withOpacity(0.85) : Colors.grey.withOpacity(0.7),
+                color: _aiActive
+                    ? Colors.blue.withOpacity(0.85)
+                    : Colors.grey.withOpacity(0.7),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(geminiKey.isNotEmpty ? Icons.auto_awesome : Icons.text_fields,
-                      color: Colors.white, size: 14),
+                  Icon(_aiBadgeIcon, color: Colors.white, size: 14),
                   const SizedBox(width: 4),
-                  Text(
-                    geminiKey.isNotEmpty ? 'Gemini AI' : 'OCR only',
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
+                  Text(_aiBadgeLabel,
+                      style: const TextStyle(color: Colors.white, fontSize: 12)),
                 ],
               ),
             ),
           ),
-          // Status + button at bottom
+          // Status + shutter button
           Positioned(
             bottom: 0, left: 0, right: 0,
             child: Container(
@@ -225,7 +257,6 @@ class _FramePainter extends CustomPainter {
       margin, size.height * 0.2,
       size.width - margin * 2, size.height * 0.45,
     );
-
     const cornerLen = 28.0;
     for (final corner in [
       [rect.left, rect.top, 1.0, 1.0],
