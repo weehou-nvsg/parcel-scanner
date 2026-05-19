@@ -29,7 +29,12 @@ class GeminiService {
     );
 
     final imageBytes = await File(imagePath).readAsBytes();
-    final imagePart = DataPart('image/jpeg', imageBytes);
+    final ext = imagePath.split('.').last.toLowerCase();
+    final mimeType = ext == 'png' ? 'image/png'
+        : ext == 'webp' ? 'image/webp'
+        : ext == 'heic' || ext == 'heif' ? 'image/heic'
+        : 'image/jpeg';
+    final imagePart = DataPart(mimeType, imageBytes);
 
     const prompt = '''
 You are a parcel label reader. Analyze this shipping/parcel label image and extract the following fields.

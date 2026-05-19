@@ -91,8 +91,15 @@ class _ScanScreenState extends State<ScanScreen> {
           cartonTotal = result.cartonTotal;
           addressLines = result.addressLines;
           rawText = result.rawResponse;
-        } catch (_) {
-          setState(() => _status = 'Gemini failed, falling back to OCR...');
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Gemini error: $e'),
+              duration: const Duration(seconds: 6),
+              backgroundColor: Colors.red.shade700,
+            ));
+          }
+          setState(() => _status = 'Gemini failed — using on-device OCR...');
           final result = await _ocr.processImage(filePath);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;
@@ -110,8 +117,15 @@ class _ScanScreenState extends State<ScanScreen> {
           cartonTotal = result.cartonTotal;
           addressLines = result.addressLines;
           rawText = result.rawResponse;
-        } catch (_) {
-          setState(() => _status = 'Claude failed, falling back to OCR...');
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Claude error: $e'),
+              duration: const Duration(seconds: 6),
+              backgroundColor: Colors.red.shade700,
+            ));
+          }
+          setState(() => _status = 'Claude failed — using on-device OCR...');
           final result = await _ocr.processImage(filePath);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;

@@ -28,6 +28,11 @@ class ClaudeService {
   Future<ClaudeResult> analyzeLabel(String imagePath) async {
     final imageBytes = await File(imagePath).readAsBytes();
     final base64Image = base64Encode(imageBytes);
+    final ext = imagePath.split('.').last.toLowerCase();
+    final mimeType = ext == 'png' ? 'image/png'
+        : ext == 'webp' ? 'image/webp'
+        : ext == 'heic' || ext == 'heif' ? 'image/heic'
+        : 'image/jpeg';
 
     const prompt = '''
 You are a parcel label reader. Analyze this shipping/parcel label image and extract the following fields.
@@ -64,7 +69,7 @@ Rules:
                 'type': 'image',
                 'source': {
                   'type': 'base64',
-                  'media_type': 'image/jpeg',
+                  'media_type': mimeType,
                   'data': base64Image,
                 },
               },
@@ -83,7 +88,11 @@ Rules:
     }
 
     final json = jsonDecode(response.body);
-    final text = (json['content'] as List).first['text'] as String;
+    final contentList = json['content'] as List?;
+    if (contentList == null || contentList.isEmpty) {
+      throw Exception('Claude returned an empty response. Body: ${response.body}');
+    }
+    final text = contentList.first['text'] as String? ?? '';
     return _parseResponse(text);
   }
 
