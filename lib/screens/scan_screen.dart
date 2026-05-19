@@ -1,5 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/ocr_service.dart';
@@ -22,6 +23,7 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isProcessing = false;
   String _status = 'Point camera at the parcel label';
   final _ocr = OcrService();
+  final _picker = ImagePicker();
 
   @override
   void initState() {
@@ -45,16 +47,29 @@ class _ScanScreenState extends State<ScanScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _pickFromGallery() async {
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 90,
+    );
+    if (picked == null) return;
+    await _processFile(picked.path);
+  }
+
   Future<void> _captureAndProcess() async {
     if (_controller == null || !_controller!.value.isInitialized || _isProcessing) return;
-
-    setState(() {
-      _isProcessing = true;
-      _status = 'Capturing...';
-    });
-
+    setState(() { _isProcessing = true; _status = 'Capturing...'; });
     try {
       final file = await _controller!.takePicture();
+      await _processFile(file.path);
+    } catch (e) {
+      setState(() { _isProcessing = false; _status = 'Error: $e'; });
+    }
+  }
+
+  Future<void> _processFile(String filePath) async {
+    setState(() { _isProcessing = true; _status = 'Processing...'; });
+    try {
       final selectedAi = widget.prefs.getString('selected_ai') ?? 'ocr';
       final geminiKey = widget.prefs.getString('gemini_api_key') ?? '';
       final claudeKey = widget.prefs.getString('claude_api_key') ?? '';
@@ -70,7 +85,7 @@ class _ScanScreenState extends State<ScanScreen> {
       if (selectedAi == 'gemini' && geminiKey.isNotEmpty) {
         setState(() => _status = 'Analysing with Gemini AI...');
         try {
-          final result = await GeminiService(geminiKey).analyzeLabel(file.path);
+          final result = await GeminiService(geminiKey).analyzeLabel(filePath);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;
           cartonTotal = result.cartonTotal;
@@ -78,17 +93,18 @@ class _ScanScreenState extends State<ScanScreen> {
           rawText = result.rawResponse;
         } catch (_) {
           setState(() => _status = 'Gemini failed, falling back to OCR...');
-          final result = await _ocr.processImage(file.path);
+          final result = await _ocr.processImage(filePath);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;
           cartonTotal = result.cartonTotal;
           addressLines = result.addressLines;
           rawText = result.rawText;
+          ocrTokens = result.allTokens;
         }
       } else if (selectedAi == 'claude' && claudeKey.isNotEmpty) {
         setState(() => _status = 'Analysing with Claude AI...');
         try {
-          final result = await ClaudeService(claudeKey).analyzeLabel(file.path);
+          final result = await ClaudeService(claudeKey).analyzeLabel(filePath);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;
           cartonTotal = result.cartonTotal;
@@ -96,16 +112,17 @@ class _ScanScreenState extends State<ScanScreen> {
           rawText = result.rawResponse;
         } catch (_) {
           setState(() => _status = 'Claude failed, falling back to OCR...');
-          final result = await _ocr.processImage(file.path);
+          final result = await _ocr.processImage(filePath);
           trackingNumber = result.trackingNumber;
           cartonCurrent = result.cartonCurrent;
           cartonTotal = result.cartonTotal;
           addressLines = result.addressLines;
           rawText = result.rawText;
+          ocrTokens = result.allTokens;
         }
       } else {
         setState(() => _status = 'Reading label...');
-        final result = await _ocr.processImage(file.path);
+        final result = await _ocr.processImage(filePath);
         trackingNumber = result.trackingNumber;
         cartonCurrent = result.cartonCurrent;
         cartonTotal = result.cartonTotal;
@@ -128,17 +145,14 @@ class _ScanScreenState extends State<ScanScreen> {
               prefix: prefix,
             ),
             rawText: rawText,
-            imagePath: file.path,
+            imagePath: filePath,
             prefs: widget.prefs,
             ocrTokens: ocrTokens,
           ),
         ),
       );
     } catch (e) {
-      setState(() {
-        _isProcessing = false;
-        _status = 'Error: $e';
-      });
+      setState(() { _isProcessing = false; _status = 'Error: $e'; });
     }
   }
 
@@ -217,23 +231,46 @@ class _ScanScreenState extends State<ScanScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    _isProcessing ? _status : 'Point at label and tap to scan',
+                    _isProcessing ? _status : 'Take a photo or upload from gallery',
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
                   if (!_isProcessing)
-                    GestureDetector(
-                      onTap: _captureAndProcess,
-                      child: Container(
-                        width: 72, height: 72,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 4),
-                          color: Colors.white24,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        // Gallery button
+                        GestureDetector(
+                          onTap: _pickFromGallery,
+                          child: Container(
+                            width: 56, height: 56,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white70, width: 2),
+                              color: Colors.white12,
+                            ),
+                            child: const Icon(Icons.photo_library,
+                                color: Colors.white70, size: 26),
+                          ),
                         ),
-                        child: const Icon(Icons.camera, color: Colors.white, size: 36),
-                      ),
+                        // Camera shutter button
+                        GestureDetector(
+                          onTap: _captureAndProcess,
+                          child: Container(
+                            width: 72, height: 72,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 4),
+                              color: Colors.white24,
+                            ),
+                            child: const Icon(Icons.camera,
+                                color: Colors.white, size: 36),
+                          ),
+                        ),
+                        // Spacer to balance layout
+                        const SizedBox(width: 56, height: 56),
+                      ],
                     )
                   else
                     const CircularProgressIndicator(color: Colors.white),
