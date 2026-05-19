@@ -11,7 +11,8 @@ dependencies:
   google_mlkit_text_recognition: ^0.13.0
   camera: ^0.10.5+9
   qr_flutter: ^4.1.0
-  flutter_bluetooth_serial: ^0.4.0
+  flutter_bluetooth_serial: ^0.4.0   # Classic BT SPP (fallback)
+  flutter_blue_plus: ^1.31.15        # BLE for HPRT HM-T3 Pro
   shared_preferences: ^2.2.2
   permission_handler: ^11.3.0
   path_provider: ^2.1.2
