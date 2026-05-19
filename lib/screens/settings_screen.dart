@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/printer_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final SharedPreferences prefs;
@@ -19,6 +22,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // 'gemini', 'claude', 'ocr'
   late String _selectedAi;
+  final _printer = PrinterService();
+  bool _scanning = false;
+  List<PrinterDevice> _bleDevices = [];
 
   @override
   void initState() {
@@ -46,6 +52,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) setState(() => _saved = false);
     });
+  }
+
+  Future<void> _scanAndConnect() async {
+    // Request runtime permissions
+    final statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+    if (statuses.values.any((s) => s.isDenied || s.isPermanentlyDenied)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bluetooth & Location permissions required.')),
+      );
+      return;
+    }
+
+    final bleState = await FlutterBluePlus.adapterState.first;
+    if (bleState != BluetoothAdapterState.on) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please turn on Bluetooth and try again.')),
+      );
+      return;
+    }
+
+    setState(() => _scanning = true);
+    try {
+      _bleDevices = await _printer.scanBleDevices(seconds: 6);
+    } catch (_) {
+      _bleDevices = [];
+    }
+    setState(() => _scanning = false);
+
+    if (!mounted) return;
+
+    if (_bleDevices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No BLE printers found. Make sure your printer is on.')),
+      );
+      return;
+    }
+
+    // Show picker
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Select Printer',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            const Divider(height: 1),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: ListView(
+                shrinkWrap: true,
+                children: _bleDevices.map((d) => ListTile(
+                  leading: const Icon(Icons.bluetooth, color: Colors.blue),
+                  title: Text(d.name),
+                  subtitle: Text('${d.id}  •  ${d.rssi} dBm'),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Connecting to ${d.name}...')),
+                    );
+                    try {
+                      await _printer.connect(d);
+                      await widget.prefs.setString('printer_address', d.id);
+                      if (mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Connected to ${d.name}')),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to connect: $e')),
+                        );
+                      }
+                    }
+                  },
+                )).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -121,15 +223,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             // --- Printer ---
             _sectionTitle('Bluetooth Printer'),
-            const Text(
-              'Pair your printer in Android Bluetooth settings first, '
-              'then connect from the Label screen.',
-              style: TextStyle(color: Colors.grey, fontSize: 13),
-            ),
-            const SizedBox(height: 8),
             if (widget.prefs.getString('printer_address') != null) ...[
               Text('Saved: ${widget.prefs.getString('printer_address')}',
                   style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 4),
               TextButton(
                 onPressed: () async {
                   await widget.prefs.remove('printer_address');
@@ -141,6 +238,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ] else
               const Text('No printer saved yet.',
                   style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: _scanning
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.bluetooth_searching),
+                label: Text(_scanning ? 'Scanning...' : 'Scan & Connect Printer'),
+                onPressed: _scanning ? null : _scanAndConnect,
+              ),
+            ),
 
             const SizedBox(height: 28),
             SizedBox(

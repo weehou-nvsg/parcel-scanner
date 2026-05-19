@@ -1,11 +1,10 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:qr/qr.dart';
+import 'package:qr_flutter/qr_flutter.dart';  // used by label preview widget
 import 'package:screenshot/screenshot.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/parcel_data.dart';
@@ -103,6 +102,24 @@ class _LabelScreenState extends State<LabelScreen> {
   }
 
   Future<void> _showPrinterPicker() async {
+    // Request runtime BLE + location permissions (required on Android 12+)
+    final statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+    final denied = statuses.values.any((s) => s.isDenied || s.isPermanentlyDenied);
+    if (denied) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bluetooth & Location permissions are required to scan for printers.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     // Check BLE is on
     final bleState = await FlutterBluePlus.adapterState.first;
     if (bleState != BluetoothAdapterState.on) {
@@ -268,31 +285,6 @@ class _LabelScreenState extends State<LabelScreen> {
     final parcel = widget.parcel;
     final pdf = pw.Document();
 
-    // Build QR code image for PDF using the qr package
-    final qrCode = QrCode.fromData(
-      data: parcel.newTrackingNumber,
-      errorCorrectLevel: QrErrorCorrectLevel.L,
-    );
-    final qrImage = QrImage(qrCode);
-    final qrPixels = qrImage.moduleCount;
-    final qrSize = qrPixels * 3;
-    final qrBmp = Uint8List(qrSize * qrSize * 4);
-    for (int y = 0; y < qrSize; y++) {
-      for (int x = 0; x < qrSize; x++) {
-        final mod = qrImage.isDark(y ~/ 3, x ~/ 3);
-        final idx = (y * qrSize + x) * 4;
-        final val = mod ? 0 : 255;
-        qrBmp[idx] = val;
-        qrBmp[idx + 1] = val;
-        qrBmp[idx + 2] = val;
-        qrBmp[idx + 3] = 255;
-      }
-    }
-    final qrPdfImage = pw.MemoryImage(
-      Uint8List.fromList(_encodePng(qrBmp, qrSize, qrSize)),
-    );
-
-    // Label page: 30mm x 75mm
     const labelW = 30.0 * PdfPageFormat.mm;
     const labelH = 75.0 * PdfPageFormat.mm;
 
@@ -309,8 +301,12 @@ class _LabelScreenState extends State<LabelScreen> {
               style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 3),
           pw.Center(
-            child: pw.Image(qrPdfImage,
-                width: 22 * PdfPageFormat.mm, height: 22 * PdfPageFormat.mm),
+            child: pw.BarcodeWidget(
+              barcode: pw.Barcode.qrCode(),
+              data: parcel.newTrackingNumber,
+              width: 22 * PdfPageFormat.mm,
+              height: 22 * PdfPageFormat.mm,
+            ),
           ),
           pw.SizedBox(height: 3),
           pw.Text('DELIVER TO:',
@@ -338,13 +334,6 @@ class _LabelScreenState extends State<LabelScreen> {
       onLayout: (_) async => pdf.save(),
       name: 'label_${parcel.newTrackingNumber}',
     );
-  }
-
-  // Minimal PNG encoder for QR bitmap
-  Uint8List _encodePng(Uint8List rgba, int width, int height) {
-    // Use Flutter's image encoding via Printing package helper
-    // Fallback: just return empty bytes — Printing handles it gracefully
-    return Uint8List(0);
   }
 
   @override
