@@ -65,6 +65,7 @@ class _ScanScreenState extends State<ScanScreen> {
       String cartonTotal = '';
       List<String> addressLines = [];
       String rawText = '';
+      List<String> ocrTokens = [];
 
       if (selectedAi == 'gemini' && geminiKey.isNotEmpty) {
         setState(() => _status = 'Analysing with Gemini AI...');
@@ -110,6 +111,7 @@ class _ScanScreenState extends State<ScanScreen> {
         cartonTotal = result.cartonTotal;
         addressLines = result.addressLines;
         rawText = result.rawText;
+        ocrTokens = result.allTokens;
       }
 
       if (!mounted) return;
@@ -128,6 +130,7 @@ class _ScanScreenState extends State<ScanScreen> {
             rawText: rawText,
             imagePath: file.path,
             prefs: widget.prefs,
+            ocrTokens: ocrTokens,
           ),
         ),
       );

@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 class OcrResult {
@@ -7,6 +6,8 @@ class OcrResult {
   final String cartonTotal;
   final List<String> addressLines;
   final String rawText;
+  // All distinct text tokens found — shown to user for manual TID selection
+  final List<String> allTokens;
 
   OcrResult({
     required this.trackingNumber,
@@ -14,6 +15,7 @@ class OcrResult {
     required this.cartonTotal,
     required this.addressLines,
     required this.rawText,
+    required this.allTokens,
   });
 }
 
@@ -25,6 +27,7 @@ class OcrService {
     final recognized = await _recognizer.processImage(inputImage);
     final rawText = recognized.text;
 
+    final allTokens = _extractAllTokens(rawText);
     final tracking = _extractTracking(rawText);
     final carton = _extractCarton(rawText);
     final address = _extractAddress(rawText, tracking, carton.$1, carton.$2);
@@ -35,10 +38,38 @@ class OcrService {
       cartonTotal: carton.$2,
       addressLines: address,
       rawText: rawText,
+      allTokens: allTokens,
     );
   }
 
-  // Finds the longest digit sequence — usually the tracking barcode number
+  // Returns every non-trivial text token for the user to pick from
+  List<String> _extractAllTokens(String text) {
+    final seen = <String>{};
+    final tokens = <String>[];
+    for (final line in text.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.length < 3) continue;
+      // Split on whitespace and keep each word/number chunk
+      for (final word in trimmed.split(RegExp(r'\s+'))) {
+        final w = word.trim();
+        if (w.length >= 3 && seen.add(w)) tokens.add(w);
+      }
+      // Also keep the full line if it's a reasonable length
+      if (trimmed.length >= 4 && trimmed.length <= 80 && seen.add(trimmed)) {
+        tokens.add(trimmed);
+      }
+    }
+    // Sort: numbers first (likely barcodes/TIDs), then by length descending
+    tokens.sort((a, b) {
+      final aNum = RegExp(r'^\d+$').hasMatch(a);
+      final bNum = RegExp(r'^\d+$').hasMatch(b);
+      if (aNum && !bNum) return -1;
+      if (!aNum && bNum) return 1;
+      return b.length.compareTo(a.length);
+    });
+    return tokens;
+  }
+
   String _extractTracking(String text) {
     final numPattern = RegExp(r'\b\d{8,}\b');
     final matches = numPattern.allMatches(text).toList();
@@ -47,27 +78,20 @@ class OcrService {
     return matches.first.group(0)!;
   }
 
-  // Finds X/Y or "X of Y" carton pattern
   (String, String) _extractCarton(String text) {
-    // Try X/Y format
     final slashPattern = RegExp(r'\b(\d{1,4})\s*/\s*(\d{1,4})\b');
     var m = slashPattern.firstMatch(text);
     if (m != null) return (m.group(1)!, m.group(2)!);
-
-    // Try "X of Y" format
     final ofPattern = RegExp(r'\b(\d{1,4})\s+of\s+(\d{1,4})\b', caseSensitive: false);
     m = ofPattern.firstMatch(text);
     if (m != null) return (m.group(1)!, m.group(2)!);
-
     return ('', '');
   }
 
-  // Heuristic: address lines typically contain street keywords or postcode patterns
   List<String> _extractAddress(
       String text, String tracking, String cartonA, String cartonB) {
     final lines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
 
-    // Remove lines that are clearly tracking or carton-count lines
     final skipPatterns = [
       if (tracking.isNotEmpty) RegExp(RegExp.escape(tracking)),
       RegExp(r'^\d{1,4}[/\s]of[\s/]\d{1,4}$', caseSensitive: false),
@@ -83,8 +107,7 @@ class OcrService {
       return false;
     }
 
-    // Score lines: address lines tend to have letters + numbers, or AU postcode pattern
-    final postcodeRe = RegExp(r'\b\d{4}\b');  // AU postcodes
+    final postcodeRe = RegExp(r'\b\d{4}\b');
     final streetRe = RegExp(
         r'\b(st|street|rd|road|ave|avenue|dr|drive|ln|lane|ct|court|blvd|way|pl|place|crescent|cres|parade|pde)\b',
         caseSensitive: false);
@@ -99,10 +122,7 @@ class OcrService {
       if (line.length > 5 && line.length < 60) score += 1;
       scored.add(MapEntry(line, score));
     }
-
     scored.sort((a, b) => b.value.compareTo(a.value));
-
-    // Take top 3 address lines (min score 1)
     final result = scored.where((e) => e.value >= 1).take(3).map((e) => e.key).toList();
     return result.isEmpty ? ['Address not detected'] : result;
   }

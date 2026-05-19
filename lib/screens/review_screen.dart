@@ -9,6 +9,8 @@ class ReviewScreen extends StatefulWidget {
   final String rawText;
   final String imagePath;
   final SharedPreferences prefs;
+  // All OCR tokens for manual TID selection (empty when using AI)
+  final List<String> ocrTokens;
 
   const ReviewScreen({
     super.key,
@@ -16,6 +18,7 @@ class ReviewScreen extends StatefulWidget {
     required this.rawText,
     required this.imagePath,
     required this.prefs,
+    this.ocrTokens = const [],
   });
 
   @override
@@ -31,6 +34,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
   late final TextEditingController _addr3Ctrl;
   late final TextEditingController _prefixCtrl;
   bool _showRaw = false;
+  bool _showTokenPicker = false;
 
   @override
   void initState() {
@@ -43,6 +47,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
     _addr2Ctrl = TextEditingController(text: p.addressLines.length > 1 ? p.addressLines[1] : '');
     _addr3Ctrl = TextEditingController(text: p.addressLines.length > 2 ? p.addressLines[2] : '');
     _prefixCtrl = TextEditingController(text: p.prefix);
+    // Auto-open picker if OCR found tokens but no tracking number was auto-detected
+    _showTokenPicker = widget.ocrTokens.isNotEmpty && p.trackingNumber.isEmpty;
   }
 
   @override
@@ -108,7 +114,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Preview of generated tracking number
+        // Generated tracking number preview
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(12),
@@ -123,11 +129,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
               const Text('Generated tracking number:',
                   style: TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 4),
-              Text(
-                _previewTracking,
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
-              ),
+              Text(_previewTracking,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
             ],
           ),
         ),
@@ -135,11 +139,93 @@ class _ReviewScreenState extends State<ReviewScreen> {
 
         _sectionLabel('Prefix'),
         _field(_prefixCtrl, 'e.g. AU, TRK-', onChanged: (_) => setState(() {})),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
 
-        _sectionLabel('Tracking Number (from label)'),
+        // --- Tracking Number with OCR token picker ---
+        Row(
+          children: [
+            Expanded(child: _sectionLabelWidget('Tracking Number (TID)')),
+            if (widget.ocrTokens.isNotEmpty)
+              TextButton.icon(
+                icon: Icon(
+                  _showTokenPicker ? Icons.expand_less : Icons.list,
+                  size: 16,
+                ),
+                label: Text(
+                  _showTokenPicker ? 'Hide picker' : 'Pick from OCR',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                onPressed: () => setState(() => _showTokenPicker = !_showTokenPicker),
+              ),
+          ],
+        ),
+        if (_showTokenPicker && widget.ocrTokens.isNotEmpty) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              border: Border.all(color: Colors.amber.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Tap a value to use it as the Tracking Number:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: widget.ocrTokens.map((token) {
+                    final isSelected = _trackingCtrl.text == token;
+                    final isNumeric = RegExp(r'^\d+$').hasMatch(token);
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _trackingCtrl.text = token;
+                          _showTokenPicker = false;
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF1565C0)
+                              : isNumeric
+                                  ? Colors.blue.shade50
+                                  : Colors.grey.shade100,
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF1565C0)
+                                : isNumeric
+                                    ? Colors.blue.shade300
+                                    : Colors.grey.shade300,
+                          ),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          token,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                            fontWeight: isNumeric ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        ],
         _field(_trackingCtrl, 'e.g. 1234567890123456', onChanged: (_) => setState(() {})),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
 
         _sectionLabel('Carton Count'),
         Row(
@@ -154,7 +240,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 onChanged: (_) => setState(() {}))),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
 
         _sectionLabel('Delivery Address'),
         _field(_addr1Ctrl, 'Line 1 (e.g. 123 Main St)'),
@@ -176,10 +262,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(widget.rawText, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
+          child: Text(widget.rawText,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
         ),
       ],
     );
@@ -214,6 +299,12 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   Widget _sectionLabel(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text(text,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.grey)),
+      );
+
+  Widget _sectionLabelWidget(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 4),
         child: Text(text,
             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.grey)),
