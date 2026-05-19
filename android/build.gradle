@@ -5,6 +5,17 @@ allprojects {
     }
 }
 
+// Force compileSdk on every plugin subproject that can't resolve flutter.compileSdkVersion
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
+                if (!compileSdkVersion) compileSdkVersion 34
+            }
+        }
+    }
+}
+
 rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
