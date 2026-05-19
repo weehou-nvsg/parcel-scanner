@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
-import 'package:qr_flutter/qr_flutter.dart';  // used by label preview widget
+import 'package:qr_flutter/qr_flutter.dart'; // used by label preview widget
 import 'package:screenshot/screenshot.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/parcel_data.dart';
-import '../services/printer_service.dart';
+import '../printing/printer_service.dart';
 
 class LabelScreen extends StatefulWidget {
   final ParcelData parcel;
@@ -23,7 +22,8 @@ class LabelScreen extends StatefulWidget {
 class _LabelScreenState extends State<LabelScreen> {
   final _printer = PrinterService();
   final _screenshotCtrl = ScreenshotController();
-  List<PrinterDevice> _bleDevices = [];
+  List<PrinterDevice> _pairedDevices = [];
+  bool _connected = false;
   bool _scanning = false;
   bool _printing = false;
   String _printerStatus = 'Not connected';
@@ -32,16 +32,21 @@ class _LabelScreenState extends State<LabelScreen> {
   @override
   void initState() {
     super.initState();
-    _loadSavedPrinter();
+    _refreshConnection();
   }
 
-  Future<void> _loadSavedPrinter() async {
-    // Restore saved protocol preference
-    final proto = widget.prefs.getString('print_protocol') ?? 'cpcl';
-    _printer.protocol = proto == 'tspl' ? PrintProtocol.tspl : PrintProtocol.cpcl;
+  // The native RFCOMM socket is process-wide, so a printer connected on the
+  // Settings screen is already usable here.
+  Future<void> _refreshConnection() async {
+    final connected = await _printer.isConnected();
+    if (!mounted) return;
+    setState(() {
+      _connected = connected;
+      if (connected) _printerStatus = 'Printer connected';
+    });
   }
 
-  // Shows the print options bottom sheet
+  // Shows the print options bottom sheet.
   void _showPrintOptions() {
     showModalBottomSheet(
       context: context,
@@ -69,11 +74,17 @@ class _LabelScreenState extends State<LabelScreen> {
                   child: const Icon(Icons.bluetooth, color: Colors.blue),
                 ),
                 title: const Text('Bluetooth Printer'),
-                subtitle: Text(_printer.isConnected ? _printer.connectedName : 'Tap to scan for BLE printers'),
+                subtitle: Text(_connected
+                    ? 'Connected — tap to print'
+                    : 'Tap to pick a paired printer'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showPrinterPicker();
+                  if (_connected) {
+                    _printBluetooth();
+                  } else {
+                    _showPrinterPicker();
+                  }
                 },
               ),
               ListTile(
@@ -102,140 +113,108 @@ class _LabelScreenState extends State<LabelScreen> {
   }
 
   Future<void> _showPrinterPicker() async {
-    // Request runtime BLE + location permissions (required on Android 12+)
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
-    ].request();
-    final denied = statuses.values.any((s) => s.isDenied || s.isPermanentlyDenied);
-    if (denied) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Bluetooth & Location permissions are required to scan for printers.'),
-          duration: Duration(seconds: 4),
-        ),
-      );
+    if (!await PrinterService.ensurePermissions()) {
+      _snack('Bluetooth permission is required to connect to a printer.');
       return;
     }
 
-    // Check BLE is on
-    final bleState = await FlutterBluePlus.adapterState.first;
-    if (bleState != BluetoothAdapterState.on) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please turn on Bluetooth and try again.')),
-      );
-      return;
-    }
-
-    setState(() { _scanning = true; _printerStatus = 'Scanning for BLE printers...'; });
+    setState(() {
+      _scanning = true;
+      _printerStatus = 'Looking for paired printers...';
+    });
     try {
-      _bleDevices = await _printer.scanBleDevices(seconds: 6);
-    } catch (e) {
-      _bleDevices = [];
+      _pairedDevices = await _printer.pairedPrinters();
+    } catch (_) {
+      _pairedDevices = [];
     }
+    if (!mounted) return;
     setState(() => _scanning = false);
 
-    if (!mounted) return;
-
-    if (_bleDevices.isEmpty) {
-      setState(() => _printerStatus = 'No BLE devices found');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No BLE printers found nearby. Make sure your HPRT printer is on and in BLE mode.'),
-          duration: Duration(seconds: 4),
-        ),
-      );
+    if (_pairedDevices.isEmpty) {
+      setState(() => _printerStatus = 'No paired printers found');
+      _snack('No paired Bluetooth devices found. Pair the HM-T3 Pro in '
+          'Android Settings → Bluetooth first (PIN is usually 0000).');
       return;
     }
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setBS) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Row(
-                    children: [
-                      const Text('Select BLE Printer',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      const Spacer(),
-                      // Protocol toggle
-                      Row(
-                        children: [
-                          const Text('CPCL', style: TextStyle(fontSize: 12)),
-                          Switch(
-                            value: _printer.protocol == PrintProtocol.tspl,
-                            onChanged: (v) async {
-                              _printer.protocol = v ? PrintProtocol.tspl : PrintProtocol.cpcl;
-                              await widget.prefs.setString('print_protocol', v ? 'tspl' : 'cpcl');
-                              setBS(() {});
-                              setState(() {});
-                            },
-                          ),
-                          const Text('TSPL', style: TextStyle(fontSize: 12)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'CPCL = HPRT HM-T3 Pro  |  TSPL = other HPRT/TSC models',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ),
-                const Divider(height: 12),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 350),
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: _bleDevices.map((d) {
-                      final isConnected = _printer.isConnected && _printer.connectedName == d.name;
-                      return ListTile(
-                        leading: Icon(
-                          isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
-                          color: isConnected ? Colors.green : Colors.blue,
-                        ),
-                        title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.w500)),
-                        subtitle: Text('${d.id}  •  ${d.rssi} dBm'),
-                        trailing: isConnected
-                            ? const Icon(Icons.check_circle, color: Colors.green)
-                            : const Icon(Icons.arrow_forward_ios, size: 14),
-                        onTap: () async {
-                          Navigator.pop(ctx);
-                          setState(() => _printerStatus = 'Connecting to ${d.name}...');
-                          try {
-                            final info = await _printer.connect(d);
-                            await widget.prefs.setString('printer_address', d.id);
-                            setState(() => _printerStatus = '$info — ${d.name}');
-                            if (mounted) _confirmBluetoothPrint();
-                          } catch (e) {
-                            setState(() => _printerStatus = 'Failed: $e');
-                          }
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ],
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text('Select Paired Printer',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
-          ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Pick your HPRT HM-T3 Pro. It must already be paired in the '
+                'Android Bluetooth settings.',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ),
+            const Divider(height: 16),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: ListView(
+                shrinkWrap: true,
+                children: _pairedDevices.map((d) {
+                  final isPrinter = _looksLikePrinter(d.name);
+                  return ListTile(
+                    leading: Icon(Icons.print,
+                        color: isPrinter ? Colors.blue : Colors.grey),
+                    title: Text(d.name,
+                        style: const TextStyle(fontWeight: FontWeight.w500)),
+                    subtitle: Text(d.address),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _connectTo(d);
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  bool _looksLikePrinter(String name) {
+    final n = name.toLowerCase();
+    return n.contains('hm-t') ||
+        n.contains('hprt') ||
+        n.contains('t3') ||
+        n.contains('printer') ||
+        n.contains('label');
+  }
+
+  Future<void> _connectTo(PrinterDevice d) async {
+    setState(() => _printerStatus = 'Connecting to ${d.name}...');
+    try {
+      await _printer.connect(d);
+      await widget.prefs.setString('printer_address', d.address);
+      if (!mounted) return;
+      setState(() {
+        _connected = true;
+        _printerStatus = 'Connected — ${d.name}';
+      });
+      _confirmBluetoothPrint();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _connected = false;
+        _printerStatus = 'Failed to connect: ${_errorText(e)}';
+      });
+      _snack('Could not connect: ${_errorText(e)}');
+    }
   }
 
   void _confirmBluetoothPrint() {
@@ -259,25 +238,23 @@ class _LabelScreenState extends State<LabelScreen> {
   }
 
   Future<void> _printBluetooth() async {
-    if (!_printer.isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connect to a Bluetooth printer first')),
-      );
+    if (!await _printer.isConnected()) {
+      if (mounted) setState(() => _connected = false);
+      _snack('Connect to a Bluetooth printer first.');
       return;
     }
-    setState(() { _printing = true; _printerStatus = 'Printing...'; });
+    setState(() {
+      _printing = true;
+      _printerStatus = 'Printing...';
+    });
     try {
-      await _printer.printLabel(
-        newTrackingNumber: widget.parcel.newTrackingNumber,
-        addressLines: widget.parcel.addressLines,
-        cartonDisplay: widget.parcel.cartonDisplay,
-        copies: _copies,
-      );
+      await _printer.printParcelLabel(widget.parcel, copies: _copies);
       setState(() => _printerStatus = 'Printed $_copies label(s)');
     } catch (e) {
-      setState(() => _printerStatus = 'Print error: $e');
+      setState(() => _printerStatus = 'Print error: ${_errorText(e)}');
+      _snack('Print failed: ${_errorText(e)}');
     } finally {
-      setState(() => _printing = false);
+      if (mounted) setState(() => _printing = false);
     }
   }
 
@@ -336,11 +313,15 @@ class _LabelScreenState extends State<LabelScreen> {
     );
   }
 
-  @override
-  void dispose() {
-    _printer.disconnect();
-    super.dispose();
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 4)),
+    );
   }
+
+  String _errorText(Object e) =>
+      e is PlatformException ? (e.message ?? 'printer error') : e.toString();
 
   @override
   Widget build(BuildContext context) {
@@ -361,42 +342,34 @@ class _LabelScreenState extends State<LabelScreen> {
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Row(
-                      children: [
-                        _scanning
-                            ? const SizedBox(width: 20, height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2))
-                            : Icon(
-                                _printer.isConnected
-                                    ? Icons.bluetooth_connected
-                                    : Icons.bluetooth,
-                                color: _printer.isConnected ? Colors.green : Colors.grey,
-                              ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(_printerStatus,
-                              style: TextStyle(
-                                color: _printer.isConnected ? Colors.green : Colors.grey[700],
-                                fontSize: 13,
-                              )),
-                        ),
-                        if (_printer.isConnected)
-                          TextButton(
-                            onPressed: _printBluetooth,
-                            child: const Text('Print now'),
+                    _scanning
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(
+                            _connected
+                                ? Icons.bluetooth_connected
+                                : Icons.bluetooth,
+                            color: _connected ? Colors.green : Colors.grey,
                           ),
-                      ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(_printerStatus,
+                          style: TextStyle(
+                            color: _connected
+                                ? Colors.green
+                                : Colors.grey[700],
+                            fontSize: 13,
+                          )),
                     ),
-                    if (_printer.isConnected) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Protocol: ${_printer.protocol == PrintProtocol.cpcl ? "CPCL (HPRT HM-T3 Pro)" : "TSPL (other models)"}',
-                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    if (_connected)
+                      TextButton(
+                        onPressed: _printing ? null : _printBluetooth,
+                        child: const Text('Print now'),
                       ),
-                    ],
                   ],
                 ),
               ),
@@ -433,8 +406,10 @@ class _LabelScreenState extends State<LabelScreen> {
               child: ElevatedButton.icon(
                 icon: _printing
                     ? const SizedBox(
-                        width: 18, height: 18,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.print),
                 label: Text(_printing ? 'Printing...' : 'Print / Save',
                     style: const TextStyle(fontSize: 18)),
@@ -452,12 +427,15 @@ class _LabelScreenState extends State<LabelScreen> {
     final w = MediaQuery.of(context).size.width - 32;
     final h = w * 2.5;
     return Container(
-      width: w, height: h,
+      width: w,
+      height: h,
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: Colors.black, width: 1.5),
         borderRadius: BorderRadius.circular(4),
-        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(2, 2))],
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(2, 2))
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(8),

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/printer_service.dart';
+import '../printing/printer_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final SharedPreferences prefs;
@@ -22,9 +21,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // 'gemini', 'claude', 'ocr'
   late String _selectedAi;
+
   final _printer = PrinterService();
-  bool _scanning = false;
-  List<PrinterDevice> _bleDevices = [];
+  bool _busy = false;
+  bool _connected = false;
+  String _printerStatus = '';
 
   @override
   void initState() {
@@ -33,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _geminiCtrl = TextEditingController(text: widget.prefs.getString('gemini_api_key') ?? '');
     _claudeCtrl = TextEditingController(text: widget.prefs.getString('claude_api_key') ?? '');
     _selectedAi = widget.prefs.getString('selected_ai') ?? 'ocr';
+    _refreshConnection();
   }
 
   @override
@@ -41,6 +43,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _geminiCtrl.dispose();
     _claudeCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshConnection() async {
+    final connected = await _printer.isConnected();
+    if (mounted) setState(() => _connected = connected);
   }
 
   Future<void> _save() async {
@@ -54,48 +61,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  Future<void> _scanAndConnect() async {
-    // Request runtime permissions
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
-    ].request();
-    if (statuses.values.any((s) => s.isDenied || s.isPermanentlyDenied)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bluetooth & Location permissions required.')),
-      );
+  // ── Printer ────────────────────────────────────────────────────────────
+  Future<void> _connectPrinter() async {
+    if (!await PrinterService.ensurePermissions()) {
+      _snack('Bluetooth permission is required to connect to a printer.');
       return;
     }
 
-    final bleState = await FlutterBluePlus.adapterState.first;
-    if (bleState != BluetoothAdapterState.on) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please turn on Bluetooth and try again.')),
-      );
-      return;
-    }
-
-    setState(() => _scanning = true);
+    setState(() {
+      _busy = true;
+      _printerStatus = 'Looking for paired printers...';
+    });
+    List<PrinterDevice> devices;
     try {
-      _bleDevices = await _printer.scanBleDevices(seconds: 6);
+      devices = await _printer.pairedPrinters();
     } catch (_) {
-      _bleDevices = [];
+      devices = const [];
     }
-    setState(() => _scanning = false);
-
     if (!mounted) return;
+    setState(() => _busy = false);
 
-    if (_bleDevices.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No BLE printers found. Make sure your printer is on.')),
-      );
+    if (devices.isEmpty) {
+      setState(() => _printerStatus = '');
+      _snack('No paired Bluetooth devices found. Pair the HM-T3 Pro in '
+          'Android Settings → Bluetooth first (PIN is usually 0000).');
       return;
     }
 
-    // Show picker
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -106,42 +98,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Select Printer',
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text('Select Paired Printer',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
-            const Divider(height: 1),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Pick your HPRT HM-T3 Pro. It must already be paired in the '
+                'Android Bluetooth settings.',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ),
+            const Divider(height: 16),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 300),
+              constraints: const BoxConstraints(maxHeight: 320),
               child: ListView(
                 shrinkWrap: true,
-                children: _bleDevices.map((d) => ListTile(
-                  leading: const Icon(Icons.bluetooth, color: Colors.blue),
-                  title: Text(d.name),
-                  subtitle: Text('${d.id}  •  ${d.rssi} dBm'),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Connecting to ${d.name}...')),
-                    );
-                    try {
-                      await _printer.connect(d);
-                      await widget.prefs.setString('printer_address', d.id);
-                      if (mounted) {
-                        setState(() {});
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Connected to ${d.name}')),
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Failed to connect: $e')),
-                        );
-                      }
-                    }
-                  },
-                )).toList(),
+                children: devices
+                    .map((d) => ListTile(
+                          leading: const Icon(Icons.print, color: Colors.blue),
+                          title: Text(d.name),
+                          subtitle: Text(d.address),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _doConnect(d);
+                          },
+                        ))
+                    .toList(),
               ),
             ),
           ],
@@ -150,8 +134,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _doConnect(PrinterDevice d) async {
+    setState(() {
+      _busy = true;
+      _printerStatus = 'Connecting to ${d.name}...';
+    });
+    try {
+      await _printer.connect(d);
+      await widget.prefs.setString('printer_address', d.address);
+      if (!mounted) return;
+      setState(() {
+        _connected = true;
+        _printerStatus = 'Connected — ${d.name}';
+      });
+      _snack('Connected to ${d.name}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _connected = false;
+        _printerStatus = '';
+      });
+      _snack('Failed to connect: ${_errorText(e)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _disconnectPrinter() async {
+    await _printer.disconnect();
+    if (mounted) {
+      setState(() {
+        _connected = false;
+        _printerStatus = '';
+      });
+    }
+  }
+
+  Future<void> _printTestLabel() async {
+    setState(() => _busy = true);
+    try {
+      await _printer.printTest();
+      _snack('Test label sent. If nothing prints, the printer is not in '
+          'ZPL mode or not connected.');
+    } catch (e) {
+      _snack('Test print failed: ${_errorText(e)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 4)),
+    );
+  }
+
+  String _errorText(Object e) =>
+      e is PlatformException ? (e.message ?? 'printer error') : e.toString();
+
   @override
   Widget build(BuildContext context) {
+    final savedAddress = widget.prefs.getString('printer_address');
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SingleChildScrollView(
@@ -223,10 +267,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             // --- Printer ---
             _sectionTitle('Bluetooth Printer'),
-            if (widget.prefs.getString('printer_address') != null) ...[
-              Text('Saved: ${widget.prefs.getString('printer_address')}',
-                  style: const TextStyle(fontSize: 13)),
+            const Text(
+              'Connects to the HPRT HM-T3 Pro over Bluetooth Classic. Pair the '
+              'printer in Android Settings → Bluetooth first.',
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(
+                  _connected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+                  size: 18,
+                  color: _connected ? Colors.green : Colors.grey,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _connected
+                        ? (_printerStatus.isEmpty ? 'Connected' : _printerStatus)
+                        : 'Not connected',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: _connected ? Colors.green : Colors.grey[700],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (savedAddress != null) ...[
               const SizedBox(height: 4),
+              Text('Last used: $savedAddress',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: _busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.bluetooth_searching),
+                label: Text(_connected ? 'Reconnect / Change Printer' : 'Connect Printer'),
+                onPressed: _busy ? null : _connectPrinter,
+              ),
+            ),
+            if (_connected) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Print Test Label'),
+                  onPressed: _busy ? null : _printTestLabel,
+                ),
+              ),
+              const SizedBox(height: 4),
+              TextButton(
+                onPressed: _busy ? null : _disconnectPrinter,
+                child: const Text('Disconnect', style: TextStyle(color: Colors.red)),
+              ),
+            ],
+            if (!_connected && savedAddress != null)
               TextButton(
                 onPressed: () async {
                   await widget.prefs.remove('printer_address');
@@ -235,22 +338,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const Text('Forget saved printer',
                     style: TextStyle(color: Colors.red)),
               ),
-            ] else
-              const Text('No printer saved yet.',
-                  style: TextStyle(color: Colors.grey, fontSize: 13)),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: _scanning
-                    ? const SizedBox(
-                        width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.bluetooth_searching),
-                label: Text(_scanning ? 'Scanning...' : 'Scan & Connect Printer'),
-                onPressed: _scanning ? null : _scanAndConnect,
-              ),
-            ),
 
             const SizedBox(height: 28),
             SizedBox(

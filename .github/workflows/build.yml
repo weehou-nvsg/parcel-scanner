@@ -34,21 +34,6 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Patch flutter_blue_plus_android build.gradle
-        run: |
-          # flutter_blue_plus_android uses flutter.compileSdkVersion which isn't
-          # available in plugin sub-projects — replace with hard-coded values.
-          FBP=$(find ~/.pub-cache -path "*flutter_blue_plus_android*/android/build.gradle" 2>/dev/null | head -1)
-          if [ -n "$FBP" ]; then
-            sed -i 's/flutter\.compileSdkVersion/34/g'  "$FBP"
-            sed -i 's/flutter\.targetSdkVersion/34/g'   "$FBP"
-            sed -i 's/flutter\.minSdkVersion/21/g'      "$FBP"
-            echo "Patched $FBP"
-            cat "$FBP"
-          else
-            echo "flutter_blue_plus_android build.gradle not found — skipping patch"
-          fi
-
       - name: Build APK (debug — installable without signing)
         run: flutter build apk --debug --no-tree-shake-icons
 
