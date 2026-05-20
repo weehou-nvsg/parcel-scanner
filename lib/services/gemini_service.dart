@@ -1,5 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 
 class GeminiResult {
   final String trackingNumber;
@@ -20,21 +21,26 @@ class GeminiResult {
 class GeminiService {
   final String apiKey;
 
+  // Uses the stable v1 REST endpoint — avoids the v1beta package limitation
+  // where gemini-1.5-flash is not resolvable.
+  static const _model = 'gemini-1.5-flash';
+  static const _endpoint =
+      'https://generativelanguage.googleapis.com/v1/models/$_model:generateContent';
+
   GeminiService(this.apiKey);
 
   Future<GeminiResult> analyzeLabel(String imagePath) async {
-    final model = GenerativeModel(
-      model: 'gemini-1.5-flash-latest',
-      apiKey: apiKey,
-    );
-
     final imageBytes = await File(imagePath).readAsBytes();
+    final base64Image = base64Encode(imageBytes);
+
     final ext = imagePath.split('.').last.toLowerCase();
-    final mimeType = ext == 'png' ? 'image/png'
-        : ext == 'webp' ? 'image/webp'
-        : ext == 'heic' || ext == 'heif' ? 'image/heic'
-        : 'image/jpeg';
-    final imagePart = DataPart(mimeType, imageBytes);
+    final mimeType = ext == 'png'
+        ? 'image/png'
+        : ext == 'webp'
+            ? 'image/webp'
+            : (ext == 'heic' || ext == 'heif')
+                ? 'image/heic'
+                : 'image/jpeg';
 
     const prompt = '''
 You are a parcel label reader. Analyze this shipping/parcel label image and extract the following fields.
@@ -53,11 +59,37 @@ Rules:
 - Do not add any explanation, just the 6 lines above
 ''';
 
-    final response = await model.generateContent([
-      Content.multi([TextPart(prompt), imagePart])
-    ]);
+    final response = await http.post(
+      Uri.parse('$_endpoint?key=$apiKey'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'contents': [
+          {
+            'parts': [
+              {
+                'inline_data': {
+                  'mime_type': mimeType,
+                  'data': base64Image,
+                }
+              },
+              {'text': prompt},
+            ]
+          }
+        ]
+      }),
+    );
 
-    final text = response.text ?? '';
+    if (response.statusCode != 200) {
+      throw Exception('Gemini API error ${response.statusCode}: ${response.body}');
+    }
+
+    final json = jsonDecode(response.body);
+    final candidates = json['candidates'] as List?;
+    if (candidates == null || candidates.isEmpty) {
+      throw Exception('Gemini returned no candidates. Body: ${response.body}');
+    }
+    final parts = candidates.first['content']['parts'] as List?;
+    final text = (parts?.isNotEmpty == true ? parts!.first['text'] as String? : null) ?? '';
     return _parseResponse(text);
   }
 
