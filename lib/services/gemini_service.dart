@@ -24,7 +24,7 @@ class GeminiService {
 
   Future<GeminiResult> analyzeLabel(String imagePath) async {
     final model = GenerativeModel(
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.5-flash-latest',
       apiKey: apiKey,
     );
 
