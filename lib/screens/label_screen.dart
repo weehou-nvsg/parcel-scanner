@@ -262,46 +262,51 @@ class _LabelScreenState extends State<LabelScreen> {
     final parcel = widget.parcel;
     final pdf = pw.Document();
 
-    const labelW = 30.0 * PdfPageFormat.mm;
-    const labelH = 75.0 * PdfPageFormat.mm;
+    // 70 mm wide × 50 mm tall — landscape label, QR dominant on the left.
+    const labelW  = 70.0 * PdfPageFormat.mm;
+    const labelH  = 50.0 * PdfPageFormat.mm;
+    const qrSize  = 44.0 * PdfPageFormat.mm; // fills almost the full height
 
     pdf.addPage(pw.Page(
       pageFormat: const PdfPageFormat(labelW, labelH,
           marginAll: 2 * PdfPageFormat.mm),
-      build: (context) => pw.Column(
+      build: (ctx) => pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text('NEW TRACKING:',
-              style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
-          pw.SizedBox(height: 1),
-          pw.Text(parcel.newTrackingNumber,
-              style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 3),
-          pw.Center(
-            child: pw.BarcodeWidget(
-              barcode: pw.Barcode.qrCode(),
-              data: parcel.newTrackingNumber,
-              width: 22 * PdfPageFormat.mm,
-              height: 22 * PdfPageFormat.mm,
-            ),
+          // ── QR code — dominant left block ──
+          pw.BarcodeWidget(
+            barcode: pw.Barcode.qrCode(),
+            data: parcel.newTrackingNumber,
+            width: qrSize,
+            height: qrSize,
           ),
-          pw.SizedBox(height: 3),
-          pw.Text('DELIVER TO:',
-              style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
-          pw.SizedBox(height: 1),
-          ...parcel.addressLines.map((l) =>
-              pw.Text(l, style: pw.TextStyle(fontSize: 6))),
-          pw.Spacer(),
-          pw.Divider(thickness: 0.5),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text('CARTON COUNT:',
-                  style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
-              pw.Text(parcel.cartonDisplay,
-                  style: pw.TextStyle(
-                      fontSize: 14, fontWeight: pw.FontWeight.bold)),
-            ],
+          pw.SizedBox(width: 2 * PdfPageFormat.mm),
+          // ── Right column: text info ──
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('NEW TRACKING:',
+                    style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
+                pw.SizedBox(height: 1),
+                pw.Text(parcel.newTrackingNumber,
+                    style: pw.TextStyle(
+                        fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 4),
+                pw.Text('DELIVER TO:',
+                    style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
+                pw.SizedBox(height: 1),
+                ...parcel.addressLines.map(
+                    (l) => pw.Text(l, style: pw.TextStyle(fontSize: 5.5))),
+                pw.Spacer(),
+                pw.Divider(thickness: 0.5),
+                pw.Text('CARTON:',
+                    style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
+                pw.Text(parcel.cartonDisplay,
+                    style: pw.TextStyle(
+                        fontSize: 20, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
           ),
         ],
       ),
@@ -424,8 +429,12 @@ class _LabelScreenState extends State<LabelScreen> {
   }
 
   Widget _buildLabelPreview(ParcelData parcel) {
+    // 70 mm × 50 mm → aspect ratio 7:5
     final w = MediaQuery.of(context).size.width - 32;
-    final h = w * 2.5;
+    final h = w * 50 / 70;
+    // QR takes the full inner height; text fills the remaining width.
+    final innerH = h - 16; // subtract top+bottom padding (8 each)
+
     return Container(
       width: w,
       height: h,
@@ -439,43 +448,52 @@ class _LabelScreenState extends State<LabelScreen> {
       ),
       child: Padding(
         padding: const EdgeInsets.all(8),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('NEW TRACKING:',
-                style: TextStyle(fontSize: 8, color: Colors.grey, fontFamily: 'monospace')),
-            const SizedBox(height: 2),
-            Text(parcel.newTrackingNumber,
-                style: const TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
-                softWrap: true),
-            const SizedBox(height: 8),
-            Center(
-              child: QrImageView(
-                data: parcel.newTrackingNumber,
-                version: QrVersions.auto,
-                size: w * 0.65,
-                backgroundColor: Colors.white,
-              ),
+            // ── QR code — dominant left block ──
+            QrImageView(
+              data: parcel.newTrackingNumber,
+              version: QrVersions.auto,
+              size: innerH,
+              backgroundColor: Colors.white,
             ),
-            const SizedBox(height: 8),
-            const Text('DELIVER TO:',
-                style: TextStyle(fontSize: 8, color: Colors.grey, fontFamily: 'monospace')),
-            const SizedBox(height: 2),
-            ...parcel.addressLines.map((line) => Text(line,
-                style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
-                overflow: TextOverflow.ellipsis)),
-            const Spacer(),
-            const Divider(height: 8, thickness: 1),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('CARTON COUNT:',
-                    style: TextStyle(fontSize: 8, color: Colors.grey)),
-                Text(parcel.cartonDisplay,
-                    style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
-              ],
+            const SizedBox(width: 8),
+            // ── Right column: text info ──
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('NEW TRACKING:',
+                      style: TextStyle(
+                          fontSize: 7, color: Colors.grey, fontFamily: 'monospace')),
+                  const SizedBox(height: 2),
+                  Text(parcel.newTrackingNumber,
+                      style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace'),
+                      softWrap: true),
+                  const SizedBox(height: 6),
+                  const Text('DELIVER TO:',
+                      style: TextStyle(
+                          fontSize: 7, color: Colors.grey, fontFamily: 'monospace')),
+                  const SizedBox(height: 2),
+                  ...parcel.addressLines.map((line) => Text(line,
+                      style: const TextStyle(
+                          fontSize: 8, fontFamily: 'monospace'),
+                      overflow: TextOverflow.ellipsis)),
+                  const Spacer(),
+                  const Divider(height: 6, thickness: 1),
+                  const Text('CARTON:',
+                      style: TextStyle(fontSize: 7, color: Colors.grey)),
+                  Text(parcel.cartonDisplay,
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace')),
+                ],
+              ),
             ),
           ],
         ),

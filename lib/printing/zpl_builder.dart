@@ -7,53 +7,48 @@ class ZplBuilder {
   /// Hardware maximum print width — the 72 mm head at 203 dpi.
   static const int maxPrintWidth = 576;
 
-  /// This app prints onto 30 mm × 75 mm label stock.
-  static const int labelWidth = 240; // 30 mm
-  static const int labelLength = 600; // 75 mm
+  /// This app prints onto 70 mm × 50 mm label stock (landscape).
+  static const int labelWidth  = 560; // 70 mm × 8 dots/mm
+  static const int labelLength = 400; // 50 mm × 8 dots/mm
 
-  /// Usable text width — [labelWidth] minus an 8-dot margin on each side.
-  static const int _textWidth = labelWidth - 16;
+  // QR column: x=8, QR occupies ~270 dots wide (magnification 9, version 3–4).
+  // Text column starts at x=_textX with _textW dots of usable width.
+  static const int _textX  = 285;
+  static const int _textW  = labelWidth - _textX - 8; // ≈ 267 dots
 
-  /// The parcel label: re-formatted tracking number as text + QR code, the
-  /// delivery address, and a large carton count. Mirrors the on-screen
-  /// preview and the PDF output.
-  ///
-  /// Geometry is tuned for 30 mm × 75 mm stock; the dot coordinates may need
-  /// adjustment if a different label size is loaded.
+  /// The parcel label: large QR code on the left, tracking number, delivery
+  /// address, and carton count stacked in the right column.
+  /// Mirrors the on-screen preview and the PDF output.
   static String parcelLabel({
     required String trackingNumber,
     required List<String> addressLines,
     required String cartonDisplay,
   }) {
     final tracking = _sanitize(trackingNumber);
-    // `\&` is the line break inside a ^FB field block.
-    final address =
-        addressLines.take(3).map(_sanitize).join(r'\&');
-    final carton = _sanitize(cartonDisplay);
+    final address  = addressLines.take(3).map(_sanitize).join(r'\&');
+    final carton   = _sanitize(cartonDisplay);
 
     return '^XA\n'
-        '^CI28\n' //                          interpret field data as UTF-8
-        '^PW$labelWidth\n' //                 print width (dots)
-        '^LL$labelLength\n' //                label length (dots)
-        '^LH0,0\n' //                         label home = top-left
-        // ── New tracking number ──
-        '^FO8,12^A0N,18,18^FDNEW TRACKING:^FS\n'
-        '^FO8,34^A0N,26,26^FB$_textWidth,3,2,L^FD$tracking^FS\n'
-        // ── QR code — encodes the same tracking number ──
-        '^FO64,112^BQN,2,4^FDMA,$tracking^FS\n'
+        '^CI28\n'
+        '^PW$labelWidth\n'
+        '^LL$labelLength\n'
+        '^LH0,0\n'
+        // ── QR code — dominant left side, magnification 9 ≈ 33–37 mm square ──
+        '^FO8,8^BQN,2,9^FDMA,$tracking^FS\n'
+        // ── Right column: tracking number ──
+        '^FO${_textX},8^A0N,15,15^FDNEW TRACKING:^FS\n'
+        '^FO${_textX},27^A0N,19,19^FB${_textW},3,2,L^FD$tracking^FS\n'
         // ── Delivery address ──
-        '^FO8,300^A0N,18,18^FDDELIVER TO:^FS\n'
-        '^FO8,322^A0N,22,22^FB$_textWidth,4,2,L^FD$address^FS\n'
+        '^FO${_textX},115^A0N,15,15^FDDELIVER TO:^FS\n'
+        '^FO${_textX},134^A0N,17,17^FB${_textW},4,2,L^FD$address^FS\n'
         // ── Divider + carton count ──
-        '^FO8,440^GB$_textWidth,2,2^FS\n'
-        '^FO8,452^A0N,18,18^FDCARTON COUNT^FS\n'
-        '^FO8,476^A0N,90,90^FD$carton^FS\n'
+        '^FO${_textX},300^GB${_textW},2,2^FS\n'
+        '^FO${_textX},308^A0N,14,14^FDCARTON:^FS\n'
+        '^FO${_textX},326^A0N,60,60^FD$carton^FS\n'
         '^XZ\n';
   }
 
   /// Minimal text-only label — send this first to confirm ZPL works at all.
-  /// If this prints, the link and language are good; if not, the problem is
-  /// the connection/transport.
   static String minimalTest() => '^XA\n'
       '^CI28\n'
       '^PW$labelWidth\n'
