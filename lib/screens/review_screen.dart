@@ -81,7 +81,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     final t = _trackingCtrl.text.trim();
     final a = _cartonCurrentCtrl.text.trim();
     final b = _cartonTotalCtrl.text.trim();
-    return '$p$t$a/$b';
+    return '$p$t$a-$b';
   }
 
   // ── OCR picker helpers ──────────────────────────────────────────────────────

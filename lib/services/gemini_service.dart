@@ -23,7 +23,7 @@ class GeminiService {
 
   // Uses the stable v1 REST endpoint — avoids the v1beta package limitation
   // where gemini-1.5-flash is not resolvable.
-  static const _model = 'gemini-3.1-flash-lite';
+  static const _model = 'gemini-2.5-flash';
   static const _endpoint =
       'https://generativelanguage.googleapis.com/v1/models/$_model:generateContent';
 
