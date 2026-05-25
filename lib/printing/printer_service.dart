@@ -54,10 +54,11 @@ class PrinterService {
 
     final sub = FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
+        final advName = r.advertisementData.localName;
         final name = r.device.platformName.isNotEmpty
             ? r.device.platformName
-            : r.advertisementData.advName.isNotEmpty
-                ? r.advertisementData.advName
+            : advName.isNotEmpty
+                ? advName
                 : 'BLE ${r.device.remoteId.str.substring(0, 8)}';
         found[r.device.remoteId.str] = PrinterDevice(
           name: name,
@@ -107,9 +108,9 @@ class PrinterService {
     // Discover services and find the Paperang write characteristic
     final services = await _device!.discoverServices();
     for (final svc in services) {
-      if (svc.serviceUuid == Guid(PaperangBuilder.serviceUuid)) {
+      if (svc.uuid == Guid(PaperangBuilder.serviceUuid)) {
         for (final chr in svc.characteristics) {
-          if (chr.characteristicUuid == Guid(PaperangBuilder.writeUuid)) {
+          if (chr.uuid == Guid(PaperangBuilder.writeUuid)) {
             _writeChr = chr;
             return;
           }
