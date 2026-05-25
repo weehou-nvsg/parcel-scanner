@@ -70,11 +70,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() {
       _busy = true;
-      _printerStatus = 'Looking for paired printers...';
+      _printerStatus = 'Scanning for Paperang...';
     });
     List<PrinterDevice> devices;
     try {
-      devices = await _printer.pairedPrinters();
+      devices = await _printer.scanDevices();
     } catch (_) {
       devices = const [];
     }
@@ -83,8 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (devices.isEmpty) {
       setState(() => _printerStatus = '');
-      _snack('No paired Bluetooth devices found. Pair the HM-T3 Pro in '
-          'Android Settings → Bluetooth first (PIN is usually 0000).');
+      _snack('No Bluetooth printers found. Make sure your Paperang is turned on and nearby.');
       return;
     }
 
@@ -105,8 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                'Pick your HPRT HM-T3 Pro. It must already be paired in the '
-                'Android Bluetooth settings.',
+                'Turn on your Paperang and select it below. No pairing needed.',
                 style: TextStyle(fontSize: 11, color: Colors.grey),
               ),
             ),
@@ -174,8 +172,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _busy = true);
     try {
       await _printer.printTest();
-      _snack('Test label sent. If nothing prints, the printer is not in '
-          'ZPL mode or not connected.');
+      _snack('Test stripes sent to Paperang. If nothing prints, check the BLE connection.');
     } catch (e) {
       _snack('Test print failed: ${_errorText(e)}');
     } finally {
@@ -266,10 +263,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 16),
 
             // --- Printer ---
-            _sectionTitle('Bluetooth Printer'),
+            _sectionTitle('Bluetooth Printer (Paperang)'),
             const Text(
-              'Connects to the HPRT HM-T3 Pro over Bluetooth Classic. Pair the '
-              'printer in Android Settings → Bluetooth first.',
+              'Connects to your Paperang P1/P2 over Bluetooth LE. '
+              'No pairing needed — just turn on the Paperang and tap Connect.',
               style: TextStyle(color: Colors.grey, fontSize: 13),
             ),
             const SizedBox(height: 10),

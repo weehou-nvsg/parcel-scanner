@@ -120,10 +120,10 @@ class _LabelScreenState extends State<LabelScreen> {
 
     setState(() {
       _scanning = true;
-      _printerStatus = 'Looking for paired printers...';
+      _printerStatus = 'Scanning for Paperang printers...';
     });
     try {
-      _pairedDevices = await _printer.pairedPrinters();
+      _pairedDevices = await _printer.scanDevices(seconds: 6);
     } catch (_) {
       _pairedDevices = [];
     }
@@ -131,9 +131,8 @@ class _LabelScreenState extends State<LabelScreen> {
     setState(() => _scanning = false);
 
     if (_pairedDevices.isEmpty) {
-      setState(() => _printerStatus = 'No paired printers found');
-      _snack('No paired Bluetooth devices found. Pair the HM-T3 Pro in '
-          'Android Settings → Bluetooth first (PIN is usually 0000).');
+      setState(() => _printerStatus = 'No BLE printers found');
+      _snack('No Bluetooth printers found nearby. Make sure your Paperang is turned on.');
       return;
     }
 
@@ -148,14 +147,13 @@ class _LabelScreenState extends State<LabelScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text('Select Paired Printer',
+              child: Text('Select Paperang Printer',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                'Pick your HPRT HM-T3 Pro. It must already be paired in the '
-                'Android Bluetooth settings.',
+                'Turn on your Paperang and select it below. No pairing needed.',
                 style: TextStyle(fontSize: 11, color: Colors.grey),
               ),
             ),
@@ -189,11 +187,11 @@ class _LabelScreenState extends State<LabelScreen> {
 
   bool _looksLikePrinter(String name) {
     final n = name.toLowerCase();
-    return n.contains('hm-t') ||
-        n.contains('hprt') ||
-        n.contains('t3') ||
-        n.contains('printer') ||
-        n.contains('label');
+    return n.contains('paperang') ||
+        n.contains('p1') ||
+        n.contains('p2') ||
+        n.contains('p-') ||
+        n.contains('printer');
   }
 
   Future<void> _connectTo(PrinterDevice d) async {
@@ -245,10 +243,14 @@ class _LabelScreenState extends State<LabelScreen> {
     }
     setState(() {
       _printing = true;
-      _printerStatus = 'Printing...';
+      _printerStatus = 'Capturing label image...';
     });
     try {
-      await _printer.printParcelLabel(widget.parcel, copies: _copies);
+      // Capture the label preview widget as a PNG and send it to the Paperang
+      final png = await _screenshotCtrl.capture(pixelRatio: 2.0);
+      if (png == null) throw Exception('Could not capture label image.');
+      setState(() => _printerStatus = 'Printing...');
+      await _printer.printFromImage(png, copies: _copies);
       setState(() => _printerStatus = 'Printed $_copies label(s)');
     } catch (e) {
       setState(() => _printerStatus = 'Print error: ${_errorText(e)}');
