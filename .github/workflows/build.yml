@@ -34,6 +34,11 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Patch flutter_blue_plus_android build.gradle
+        run: |
+          sed -i 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 34/g' \
+            $HOME/.pub-cache/hosted/pub.dev/flutter_blue_plus_android-7.0.4/android/build.gradle
+
       - name: Build APK (debug — installable without signing)
         run: flutter build apk --debug --no-tree-shake-icons
 
