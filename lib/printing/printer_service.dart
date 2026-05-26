@@ -35,13 +35,15 @@ class PrinterService {
 
   // ── Permissions ──────────────────────────────────────────────────────────
 
-  /// Requests the BLE + location runtime permissions Android needs for scanning.
+  /// Requests the BLE runtime permissions Android needs for scanning.
   static Future<bool> ensurePermissions() async {
     final statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
     ].request();
+    // Also request location silently for Android 11 and below — ignore result
+    // since Android 12+ doesn't need it and we don't want to block on denial.
+    await Permission.locationWhenInUse.request();
     return statuses.values.every((s) => s.isGranted);
   }
 
