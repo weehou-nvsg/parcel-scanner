@@ -54,7 +54,7 @@ class PrinterService {
 
     final sub = FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
-        final advName = r.advertisementData.localName;
+        final advName = r.advertisementData.advName;
         final name = r.device.platformName.isNotEmpty
             ? r.device.platformName
             : advName.isNotEmpty
