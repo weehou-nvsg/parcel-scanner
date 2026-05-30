@@ -97,7 +97,6 @@ class PrinterService {
 
   /// Connects to [printer] and discovers the Paperang write characteristic.
   Future<void> connect(PrinterDevice printer) async {
-    // Disconnect any existing connection first
     await disconnect();
 
     await printer.bleDevice.connect(
@@ -107,33 +106,43 @@ class PrinterService {
     _device = printer.bleDevice;
     _connectedName = printer.name;
 
-    // Discover services and find the Paperang write characteristic
     final services = await _device!.discoverServices();
+
+    // Find write + notify characteristics in the Paperang service
+    BluetoothCharacteristic? notifyChr;
     for (final svc in services) {
       if (svc.uuid == Guid(PaperangBuilder.serviceUuid)) {
         for (final chr in svc.characteristics) {
-          if (chr.uuid == Guid(PaperangBuilder.writeUuid)) {
+          if (chr.uuid == Guid(PaperangBuilder.writeUuid)) _writeChr = chr;
+          if (chr.uuid == Guid(PaperangBuilder.notifyUuid)) notifyChr = chr;
+        }
+      }
+    }
+
+    // Fallback: any writable characteristic
+    if (_writeChr == null) {
+      for (final svc in services) {
+        for (final chr in svc.characteristics) {
+          if (chr.properties.write || chr.properties.writeWithoutResponse) {
             _writeChr = chr;
-            return;
+            break;
           }
         }
+        if (_writeChr != null) break;
       }
     }
 
-    // If Paperang service UUID not found, try to find any writable characteristic
-    // (some firmware versions don't advertise the UUID correctly)
-    for (final svc in services) {
-      for (final chr in svc.characteristics) {
-        if (chr.properties.write || chr.properties.writeWithoutResponse) {
-          _writeChr = chr;
-          return;
-        }
-      }
+    if (_writeChr == null) {
+      throw Exception(
+          'Could not find a writable characteristic on ${printer.name}. '
+          'Is this a Paperang printer?');
     }
 
-    throw Exception(
-        'Could not find a writable characteristic on ${printer.name}. '
-        'Is this a Paperang printer?');
+    // Subscribe to notifications — the P1 requires this before it will
+    // process any incoming print data (acts as a handshake).
+    if (notifyChr != null) {
+      await notifyChr.setNotifyValue(true);
+    }
   }
 
   Future<void> disconnect() async {
@@ -176,7 +185,7 @@ class PrinterService {
     for (int copy = 0; copy < copies.clamp(1, 99); copy++) {
       for (final pkt in packets) {
         await _writeChr!.write(pkt, withoutResponse: useWithoutResponse);
-        await Future.delayed(const Duration(milliseconds: 30));
+        await Future.delayed(const Duration(milliseconds: 50));
       }
       if (copies > 1 && copy < copies - 1) {
         // Small pause between copies so the printer keeps up
@@ -194,7 +203,7 @@ class PrinterService {
     final useWithoutResponse = _writeChr!.properties.writeWithoutResponse;
     for (final pkt in packets) {
       await _writeChr!.write(pkt, withoutResponse: useWithoutResponse);
-      await Future.delayed(const Duration(milliseconds: 30));
+      await Future.delayed(const Duration(milliseconds: 50));
     }
   }
 
