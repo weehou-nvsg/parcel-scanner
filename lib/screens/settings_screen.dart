@@ -1,6 +1,8 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../printing/paperang_builder.dart';
 import '../printing/printer_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -168,13 +170,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _printTestLabel() async {
+  Future<void> _printTest(String label, List<Uint8List> packets) async {
     setState(() => _busy = true);
     try {
-      await _printer.printTest();
-      _snack('Test stripes sent to Paperang. If nothing prints, check the BLE connection.');
+      await _printer.printTestPackets(packets);
+      _snack('$label sent — check the paper.');
     } catch (e) {
-      _snack('Test print failed: ${_errorText(e)}');
+      _snack('Test failed: ${_errorText(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -312,13 +314,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             if (_connected) ...[
               const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.receipt_long),
-                  label: const Text('Print Test Label'),
-                  onPressed: _busy ? null : _printTestLabel,
-                ),
+              const Text('Test Patterns', style: TextStyle(fontSize: 13, color: Colors.grey)),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _busy ? null : () => _printTest('Stripes', PaperangBuilder.buildTestStripes()),
+                      child: const Text('Stripes', textAlign: TextAlign.center),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _busy ? null : () => _printTest('Solid', PaperangBuilder.buildTestSolid()),
+                      child: const Text('Solid', textAlign: TextAlign.center),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _busy ? null : () => _printTest('Checker', PaperangBuilder.buildTestCheckerboard()),
+                      child: const Text('Checker', textAlign: TextAlign.center),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _busy ? null : () => _printTest('Border', PaperangBuilder.buildTestBorder()),
+                      child: const Text('Border', textAlign: TextAlign.center),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 4),
               TextButton(

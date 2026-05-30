@@ -186,9 +186,11 @@ class PrinterService {
   }
 
   /// Sends a test stripe pattern to verify the connection.
-  Future<void> printTest() async {
+  Future<void> printTest() async => printTestPackets(PaperangBuilder.buildTestJob());
+
+  /// Sends any pre-built packet list (used by test pattern buttons).
+  Future<void> printTestPackets(List<Uint8List> packets) async {
     if (_writeChr == null) throw Exception('Not connected to a printer.');
-    final packets = PaperangBuilder.buildTestJob();
     final useWithoutResponse = _writeChr!.properties.writeWithoutResponse;
     for (final pkt in packets) {
       await _writeChr!.write(pkt, withoutResponse: useWithoutResponse);

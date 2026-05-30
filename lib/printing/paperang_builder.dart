@@ -122,8 +122,8 @@ class PaperangBuilder {
     return packets;
   }
 
-  /// Simple test job — alternating black/white horizontal stripes.
-  static List<Uint8List> buildTestJob() {
+  /// Test 1 — horizontal stripes (alternating 5px black/white bands).
+  static List<Uint8List> buildTestStripes() {
     final lines = <Uint8List>[];
     for (int y = 0; y < 100; y++) {
       final line = Uint8List(bytesPerLine);
@@ -133,4 +133,50 @@ class PaperangBuilder {
     }
     return buildPrintJob(lines, feedPixels: 60);
   }
+
+  /// Test 2 — solid black block (full ink coverage).
+  static List<Uint8List> buildTestSolid() {
+    final lines = <Uint8List>[];
+    for (int y = 0; y < 100; y++) {
+      final line = Uint8List(bytesPerLine)..fillRange(0, bytesPerLine, 0xFF);
+      lines.add(line);
+    }
+    return buildPrintJob(lines, feedPixels: 60);
+  }
+
+  /// Test 3 — checkerboard (8×8 pixel squares alternating black/white).
+  static List<Uint8List> buildTestCheckerboard() {
+    final lines = <Uint8List>[];
+    for (int y = 0; y < 100; y++) {
+      final line = Uint8List(bytesPerLine);
+      for (int b = 0; b < bytesPerLine; b++) {
+        // Each byte = 8 pixels; alternate 0xAA / 0x55 per row, shift per col
+        final rowShift = (y ~/ 8).isEven;
+        line[b] = rowShift ? 0xAA : 0x55;
+      }
+      lines.add(line);
+    }
+    return buildPrintJob(lines, feedPixels: 60);
+  }
+
+  /// Test 4 — border only (outline rectangle, blank inside).
+  static List<Uint8List> buildTestBorder() {
+    final lines = <Uint8List>[];
+    for (int y = 0; y < 100; y++) {
+      final line = Uint8List(bytesPerLine);
+      if (y == 0 || y == 99) {
+        // Top and bottom edge — full line
+        line.fillRange(0, bytesPerLine, 0xFF);
+      } else {
+        // Left 3 pixels and right 3 pixels only
+        line[0] = 0xE0;                     // 3 left pixels
+        line[bytesPerLine - 1] = 0x07;      // 3 right pixels
+      }
+      lines.add(line);
+    }
+    return buildPrintJob(lines, feedPixels: 60);
+  }
+
+  /// Kept for backward compatibility.
+  static List<Uint8List> buildTestJob() => buildTestStripes();
 }
