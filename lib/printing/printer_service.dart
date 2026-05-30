@@ -188,13 +188,27 @@ class PrinterService {
   /// Sends a test stripe pattern to verify the connection.
   Future<void> printTest() async => printTestPackets(PaperangBuilder.buildTestJob());
 
-  /// Sends any pre-built packet list (used by test pattern buttons).
+  /// Sends any pre-built packet list (used by Paperang test pattern buttons).
   Future<void> printTestPackets(List<Uint8List> packets) async {
     if (_writeChr == null) throw Exception('Not connected to a printer.');
     final useWithoutResponse = _writeChr!.properties.writeWithoutResponse;
     for (final pkt in packets) {
       await _writeChr!.write(pkt, withoutResponse: useWithoutResponse);
       await Future.delayed(const Duration(milliseconds: 30));
+    }
+  }
+
+  /// Sends raw bytes directly — no Paperang framing.
+  /// Used for ESC/POS, ZPL, TSPL, CPCL language tests.
+  /// Chunks into 20-byte pieces (safe BLE MTU default).
+  Future<void> printRaw(Uint8List bytes) async {
+    if (_writeChr == null) throw Exception('Not connected to a printer.');
+    final useWithoutResponse = _writeChr!.properties.writeWithoutResponse;
+    const chunkSize = 20;
+    for (int i = 0; i < bytes.length; i += chunkSize) {
+      final end = (i + chunkSize).clamp(0, bytes.length);
+      await _writeChr!.write(bytes.sublist(i, end), withoutResponse: useWithoutResponse);
+      await Future.delayed(const Duration(milliseconds: 20));
     }
   }
 }

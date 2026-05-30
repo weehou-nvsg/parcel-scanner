@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../printing/paperang_builder.dart';
+import '../printing/print_language_tester.dart';
 import '../printing/printer_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -182,6 +183,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _printRaw(String label, Uint8List bytes) async {
+    setState(() => _busy = true);
+    try {
+      await _printer.printRaw(bytes);
+      _snack('$label sent — check the paper.');
+    } catch (e) {
+      _snack('Test failed: ${_errorText(e)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -313,44 +326,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             if (_connected) ...[
-              const SizedBox(height: 8),
-              const Text('Test Patterns', style: TextStyle(fontSize: 13, color: Colors.grey)),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _busy ? null : () => _printTest('Stripes', PaperangBuilder.buildTestStripes()),
-                      child: const Text('Stripes', textAlign: TextAlign.center),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _busy ? null : () => _printTest('Solid', PaperangBuilder.buildTestSolid()),
-                      child: const Text('Solid', textAlign: TextAlign.center),
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 10),
+              const Text(
+                'Tap each language to test — whichever prints = the right one.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _busy ? null : () => _printTest('Checker', PaperangBuilder.buildTestCheckerboard()),
-                      child: const Text('Checker', textAlign: TextAlign.center),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _busy ? null : () => _printTest('Border', PaperangBuilder.buildTestBorder()),
-                      child: const Text('Border', textAlign: TextAlign.center),
-                    ),
-                  ),
-                ],
-              ),
+              _langTestButton('Paperang (proprietary)', Colors.blue,
+                  () => _printTest('Paperang', PaperangBuilder.buildTestStripes())),
+              _langTestButton('ESC/POS (most common)', Colors.green,
+                  () => _printRaw('ESC/POS', PrintLanguageTester.escPos())),
+              _langTestButton('ZPL (Zebra)', Colors.orange,
+                  () => _printRaw('ZPL', PrintLanguageTester.zpl())),
+              _langTestButton('TSPL (TSC)', Colors.purple,
+                  () => _printRaw('TSPL', PrintLanguageTester.tspl())),
+              _langTestButton('CPCL (Honeywell/Zebra mobile)', Colors.teal,
+                  () => _printRaw('CPCL', PrintLanguageTester.cpcl())),
               const SizedBox(height: 4),
               TextButton(
                 onPressed: _busy ? null : _disconnectPrinter,
@@ -494,6 +485,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  Widget _langTestButton(String label, Color color, VoidCallback onPressed) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: color,
+              side: BorderSide(color: color),
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+            onPressed: _busy ? null : onPressed,
+            child: Text(label),
+          ),
+        ),
+      );
 
   Widget _sectionTitle(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
