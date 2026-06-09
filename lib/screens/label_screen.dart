@@ -3,8 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:qr_flutter/qr_flutter.dart'; // used by label preview widget
-import 'package:screenshot/screenshot.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/parcel_data.dart';
 import '../printing/printer_service.dart';
@@ -21,8 +20,6 @@ class LabelScreen extends StatefulWidget {
 
 class _LabelScreenState extends State<LabelScreen> {
   final _printer = PrinterService();
-  final _screenshotCtrl = ScreenshotController();
-  List<PrinterDevice> _pairedDevices = [];
   bool _connected = false;
   bool _scanning = false;
   bool _printing = false;
@@ -35,18 +32,15 @@ class _LabelScreenState extends State<LabelScreen> {
     _refreshConnection();
   }
 
-  // The native RFCOMM socket is process-wide, so a printer connected on the
-  // Settings screen is already usable here.
   Future<void> _refreshConnection() async {
     final connected = await _printer.isConnected();
     if (!mounted) return;
     setState(() {
       _connected = connected;
-      if (connected) _printerStatus = 'Printer connected';
+      if (connected) _printerStatus = 'Printer ready — ${_printer.connectedName}';
     });
   }
 
-  // Shows the print options bottom sheet.
   void _showPrintOptions() {
     showModalBottomSheet(
       context: context,
@@ -97,7 +91,7 @@ class _LabelScreenState extends State<LabelScreen> {
                   child: const Icon(Icons.picture_as_pdf, color: Colors.red),
                 ),
                 title: const Text('Save / Print as PDF'),
-                subtitle: const Text('Opens system print dialog — save to PDF or print'),
+                subtitle: const Text('Opens system print dialog'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -114,25 +108,27 @@ class _LabelScreenState extends State<LabelScreen> {
 
   Future<void> _showPrinterPicker() async {
     if (!await PrinterService.ensurePermissions()) {
-      _snack('Bluetooth permission is required to connect to a printer.');
+      _snack('Bluetooth permission required.');
       return;
     }
 
     setState(() {
       _scanning = true;
-      _printerStatus = 'Scanning for Paperang printers...';
+      _printerStatus = 'Loading paired printers...';
     });
+
+    List<PrinterDevice> devices;
     try {
-      _pairedDevices = await _printer.scanDevices(seconds: 6);
+      devices = await _printer.scanDevices();
     } catch (_) {
-      _pairedDevices = [];
+      devices = [];
     }
     if (!mounted) return;
     setState(() => _scanning = false);
 
-    if (_pairedDevices.isEmpty) {
-      setState(() => _printerStatus = 'No BLE printers found');
-      _snack('No Bluetooth printers found nearby. Make sure your Paperang is turned on.');
+    if (devices.isEmpty) {
+      setState(() => _printerStatus = 'No paired printers found');
+      _snack('No paired printers found. Pair your RP4B in Android Bluetooth Settings first.');
       return;
     }
 
@@ -147,51 +143,31 @@ class _LabelScreenState extends State<LabelScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text('Select Paperang Printer',
+              child: Text('Select Printer',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Turn on your Paperang and select it below. No pairing needed.',
-                style: TextStyle(fontSize: 11, color: Colors.grey),
-              ),
             ),
             const Divider(height: 16),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 320),
               child: ListView(
                 shrinkWrap: true,
-                children: _pairedDevices.map((d) {
-                  final isPrinter = _looksLikePrinter(d.name);
-                  return ListTile(
-                    leading: Icon(Icons.print,
-                        color: isPrinter ? Colors.blue : Colors.grey),
-                    title: Text(d.name,
-                        style: const TextStyle(fontWeight: FontWeight.w500)),
-                    subtitle: Text(d.address),
-                    trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _connectTo(d);
-                    },
-                  );
-                }).toList(),
+                children: devices.map((d) => ListTile(
+                  leading: const Icon(Icons.print, color: Colors.blue),
+                  title: Text(d.name,
+                      style: const TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: Text(d.address),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _connectTo(d);
+                  },
+                )).toList(),
               ),
             ),
           ],
         ),
       ),
     );
-  }
-
-  bool _looksLikePrinter(String name) {
-    final n = name.toLowerCase();
-    return n.contains('paperang') ||
-        n.contains('p1') ||
-        n.contains('p2') ||
-        n.contains('p-') ||
-        n.contains('printer');
   }
 
   Future<void> _connectTo(PrinterDevice d) async {
@@ -209,7 +185,7 @@ class _LabelScreenState extends State<LabelScreen> {
       if (!mounted) return;
       setState(() {
         _connected = false;
-        _printerStatus = 'Failed to connect: ${_errorText(e)}';
+        _printerStatus = 'Failed to connect: ${_errorText(e)}',
       });
       _snack('Could not connect: ${_errorText(e)}');
     }
@@ -222,7 +198,9 @@ class _LabelScreenState extends State<LabelScreen> {
         title: const Text('Printer connected'),
         content: Text('Print $_copies label(s) now?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Not yet')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Not yet')),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
@@ -243,14 +221,16 @@ class _LabelScreenState extends State<LabelScreen> {
     }
     setState(() {
       _printing = true;
-      _printerStatus = 'Capturing label image...';
+      _printerStatus = 'Printing...';
     });
     try {
-      // Capture the label preview widget as a PNG and send it to the Paperang
-      final png = await _screenshotCtrl.capture(pixelRatio: 2.0);
-      if (png == null) throw Exception('Could not capture label image.');
-      setState(() => _printerStatus = 'Printing...');
-      await _printer.printFromImage(png, copies: _copies);
+      final parcel = widget.parcel;
+      await _printer.printLabel(
+        trackingNumber: parcel.newTrackingNumber,
+        addressLines: parcel.addressLines,
+        cartonDisplay: parcel.cartonDisplay,
+        copies: _copies,
+      );
       setState(() => _printerStatus = 'Printed $_copies label(s)');
     } catch (e) {
       setState(() => _printerStatus = 'Print error: ${_errorText(e)}');
@@ -264,52 +244,44 @@ class _LabelScreenState extends State<LabelScreen> {
     final parcel = widget.parcel;
     final pdf = pw.Document();
 
-    // 70 mm wide × 50 mm tall — landscape label, QR dominant on the left.
-    const labelW  = 70.0 * PdfPageFormat.mm;
-    const labelH  = 50.0 * PdfPageFormat.mm;
-    const qrSize  = 44.0 * PdfPageFormat.mm; // fills almost the full height
+    // 100 mm × 150 mm portrait — large QR dominant at top.
+    const labelW = 100.0 * PdfPageFormat.mm;
+    const labelH = 150.0 * PdfPageFormat.mm;
+    const qrSize = 82.0 * PdfPageFormat.mm;
 
     pdf.addPage(pw.Page(
       pageFormat: const PdfPageFormat(labelW, labelH,
-          marginAll: 2 * PdfPageFormat.mm),
-      build: (ctx) => pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
+          marginAll: 3 * PdfPageFormat.mm),
+      build: (ctx) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
-          // ── QR code — dominant left block ──
-          pw.BarcodeWidget(
-            barcode: pw.Barcode.qrCode(),
-            data: parcel.newTrackingNumber,
-            width: qrSize,
-            height: qrSize,
-          ),
-          pw.SizedBox(width: 2 * PdfPageFormat.mm),
-          // ── Right column: text info ──
-          pw.Expanded(
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text('NEW TRACKING:',
-                    style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
-                pw.SizedBox(height: 1),
-                pw.Text(parcel.newTrackingNumber,
-                    style: pw.TextStyle(
-                        fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
-                pw.SizedBox(height: 4),
-                pw.Text('DELIVER TO:',
-                    style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
-                pw.SizedBox(height: 1),
-                ...parcel.addressLines.map(
-                    (l) => pw.Text(l, style: pw.TextStyle(fontSize: 5.5))),
-                pw.Spacer(),
-                pw.Divider(thickness: 0.5),
-                pw.Text('CARTON:',
-                    style: pw.TextStyle(fontSize: 5, color: PdfColors.grey600)),
-                pw.Text(parcel.cartonDisplay,
-                    style: pw.TextStyle(
-                        fontSize: 20, fontWeight: pw.FontWeight.bold)),
-              ],
+          pw.Center(
+            child: pw.BarcodeWidget(
+              barcode: pw.Barcode.qrCode(),
+              data: parcel.newTrackingNumber,
+              width: qrSize,
+              height: qrSize,
             ),
           ),
+          pw.SizedBox(height: 3 * PdfPageFormat.mm),
+          pw.Text('NEW TRACKING:',
+              style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600)),
+          pw.SizedBox(height: 1),
+          pw.Text(parcel.newTrackingNumber,
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 3 * PdfPageFormat.mm),
+          pw.Text('DELIVER TO:',
+              style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600)),
+          pw.SizedBox(height: 1),
+          ...parcel.addressLines
+              .map((l) => pw.Text(l, style: pw.TextStyle(fontSize: 7))),
+          pw.Spacer(),
+          pw.Divider(thickness: 0.5),
+          pw.Text('CARTON:',
+              style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600)),
+          pw.Text(parcel.cartonDisplay,
+              style: pw.TextStyle(
+                  fontSize: 28, fontWeight: pw.FontWeight.bold)),
         ],
       ),
     ));
@@ -339,10 +311,7 @@ class _LabelScreenState extends State<LabelScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Screenshot(
-              controller: _screenshotCtrl,
-              child: _buildLabelPreview(parcel),
-            ),
+            _buildLabelPreview(parcel),
             const SizedBox(height: 24),
 
             // Bluetooth status card
@@ -393,10 +362,12 @@ class _LabelScreenState extends State<LabelScreen> {
                     const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: _copies > 1 ? () => setState(() => _copies--) : null,
+                      onPressed:
+                          _copies > 1 ? () => setState(() => _copies--) : null,
                     ),
                     Text('$_copies',
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold)),
                     IconButton(
                       icon: const Icon(Icons.add_circle_outline),
                       onPressed: () => setState(() => _copies++),
@@ -407,7 +378,6 @@ class _LabelScreenState extends State<LabelScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Main print button — opens options sheet
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -431,11 +401,10 @@ class _LabelScreenState extends State<LabelScreen> {
   }
 
   Widget _buildLabelPreview(ParcelData parcel) {
-    // 70 mm × 50 mm → aspect ratio 7:5
+    // 100 mm × 150 mm portrait → aspect ratio 2:3
     final w = MediaQuery.of(context).size.width - 32;
-    final h = w * 50 / 70;
-    // QR takes the full inner height; text fills the remaining width.
-    final innerH = h - 16; // subtract top+bottom padding (8 each)
+    final h = w * 150 / 100;
+    final qrSize = w * 0.78; // QR takes 78% of label width
 
     return Container(
       width: w,
@@ -445,58 +414,47 @@ class _LabelScreenState extends State<LabelScreen> {
         border: Border.all(color: Colors.black, width: 1.5),
         borderRadius: BorderRadius.circular(4),
         boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(2, 2))
+          BoxShadow(
+              color: Colors.black26, blurRadius: 6, offset: Offset(2, 2))
         ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // ── QR code — dominant left block ──
+            // Large QR code
             QrImageView(
               data: parcel.newTrackingNumber,
               version: QrVersions.auto,
-              size: innerH,
+              size: qrSize,
               backgroundColor: Colors.white,
             ),
-            const SizedBox(width: 8),
-            // ── Right column: text info ──
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('NEW TRACKING:',
-                      style: TextStyle(
-                          fontSize: 7, color: Colors.grey, fontFamily: 'monospace')),
-                  const SizedBox(height: 2),
-                  Text(parcel.newTrackingNumber,
-                      style: const TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace'),
-                      softWrap: true),
-                  const SizedBox(height: 6),
-                  const Text('DELIVER TO:',
-                      style: TextStyle(
-                          fontSize: 7, color: Colors.grey, fontFamily: 'monospace')),
-                  const SizedBox(height: 2),
-                  ...parcel.addressLines.map((line) => Text(line,
-                      style: const TextStyle(
-                          fontSize: 8, fontFamily: 'monospace'),
-                      overflow: TextOverflow.ellipsis)),
-                  const Spacer(),
-                  const Divider(height: 6, thickness: 1),
-                  const Text('CARTON:',
-                      style: TextStyle(fontSize: 7, color: Colors.grey)),
-                  Text(parcel.cartonDisplay,
-                      style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace')),
-                ],
-              ),
-            ),
+            const SizedBox(height: 4),
+            const Text('NEW TRACKING:',
+                style: TextStyle(fontSize: 7, color: Colors.grey)),
+            Text(parcel.newTrackingNumber,
+                style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace'),
+                textAlign: TextAlign.center,
+                softWrap: true),
+            const SizedBox(height: 4),
+            const Text('DELIVER TO:',
+                style: TextStyle(fontSize: 7, color: Colors.grey)),
+            ...parcel.addressLines.map((line) => Text(line,
+                style: const TextStyle(fontSize: 8, fontFamily: 'monospace'),
+                overflow: TextOverflow.ellipsis)),
+            const Spacer(),
+            const Divider(height: 6, thickness: 1),
+            const Text('CARTON:',
+                style: TextStyle(fontSize: 7, color: Colors.grey)),
+            Text(parcel.cartonDisplay,
+                style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace')),
           ],
         ),
       ),

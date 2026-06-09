@@ -1,9 +1,6 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../printing/paperang_builder.dart';
-import '../printing/print_language_tester.dart';
 import '../printing/printer_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -73,7 +70,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() {
       _busy = true;
-      _printerStatus = 'Scanning for Paperang...';
+      _printerStatus = 'Loading paired printers...';
     });
     List<PrinterDevice> devices;
     try {
@@ -86,7 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (devices.isEmpty) {
       setState(() => _printerStatus = '');
-      _snack('No Bluetooth printers found. Make sure your Paperang is turned on and nearby.');
+      _snack('No paired printers found. Pair your RP4B in Android Bluetooth Settings first, then come back here.');
       return;
     }
 
@@ -101,15 +98,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text('Select Paired Printer',
+              child: Text('Select Printer',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Turn on your Paperang and select it below. No pairing needed.',
-                style: TextStyle(fontSize: 11, color: Colors.grey),
-              ),
             ),
             const Divider(height: 16),
             ConstrainedBox(
@@ -171,23 +161,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _printTest(String label, List<Uint8List> packets) async {
+  Future<void> _printTestLabel() async {
     setState(() => _busy = true);
     try {
-      await _printer.printTestPackets(packets);
-      _snack('$label sent — check the paper.');
-    } catch (e) {
-      _snack('Test failed: ${_errorText(e)}');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _printRaw(String label, Uint8List bytes) async {
-    setState(() => _busy = true);
-    try {
-      await _printer.printRaw(bytes);
-      _snack('$label sent — check the paper.');
+      await _printer.printTest();
+      _snack('Test label sent — check the paper.');
     } catch (e) {
       _snack('Test failed: ${_errorText(e)}');
     } finally {
@@ -278,10 +256,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 16),
 
             // --- Printer ---
-            _sectionTitle('Bluetooth Printer (Paperang)'),
+            _sectionTitle('Bluetooth Printer (Honeywell RP4B)'),
             const Text(
-              'Connects to your Paperang P1/P2 over Bluetooth LE. '
-              'No pairing needed — just turn on the Paperang and tap Connect.',
+              'Pair your RP4B in Android Bluetooth Settings first, '
+              'then tap Connect to select it here.',
               style: TextStyle(color: Colors.grey, fontSize: 13),
             ),
             const SizedBox(height: 10),
@@ -326,22 +304,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             if (_connected) ...[
-              const SizedBox(height: 10),
-              const Text(
-                'Tap each language to test — whichever prints = the right one.',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
               const SizedBox(height: 8),
-              _langTestButton('Paperang (proprietary)', Colors.blue,
-                  () => _printTest('Paperang', PaperangBuilder.buildTestStripes())),
-              _langTestButton('ESC/POS (most common)', Colors.green,
-                  () => _printRaw('ESC/POS', PrintLanguageTester.escPos())),
-              _langTestButton('ZPL (Zebra)', Colors.orange,
-                  () => _printRaw('ZPL', PrintLanguageTester.zpl())),
-              _langTestButton('TSPL (TSC)', Colors.purple,
-                  () => _printRaw('TSPL', PrintLanguageTester.tspl())),
-              _langTestButton('CPCL (Honeywell/Zebra mobile)', Colors.teal,
-                  () => _printRaw('CPCL', PrintLanguageTester.cpcl())),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Print Test Label'),
+                  onPressed: _busy ? null : _printTestLabel,
+                ),
+              ),
               const SizedBox(height: 4),
               TextButton(
                 onPressed: _busy ? null : _disconnectPrinter,
@@ -486,23 +457,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _langTestButton(String label, Color color, VoidCallback onPressed) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: color,
-              side: BorderSide(color: color),
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            ),
-            onPressed: _busy ? null : onPressed,
-            child: Text(label),
-          ),
-        ),
-      );
 
   Widget _sectionTitle(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
