@@ -34,6 +34,14 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Patch flutter_bluetooth_serial build.gradle (missing namespace)
+        run: |
+          FILE=$(find $HOME/.pub-cache -name "build.gradle" -path "*flutter_bluetooth_serial*" | grep -v example | head -1)
+          MANIFEST=$(find $HOME/.pub-cache -name "AndroidManifest.xml" -path "*flutter_bluetooth_serial*" | grep -v example | head -1)
+          PKG=$(grep -oP '(?<=package=")[^"]+' "$MANIFEST" | head -1)
+          echo "Patching $FILE with namespace '$PKG'"
+          sed -i "/^android {/a\\    namespace '$PKG'" "$FILE"
+
       - name: Build APK (debug — installable without signing)
         run: flutter build apk --debug --no-tree-shake-icons
 
