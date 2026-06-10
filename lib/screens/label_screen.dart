@@ -185,7 +185,7 @@ class _LabelScreenState extends State<LabelScreen> {
       if (!mounted) return;
       setState(() {
         _connected = false;
-        _printerStatus = 'Failed to connect: ${_errorText(e)}',
+        _printerStatus = 'Failed to connect: ${_errorText(e)}';
       });
       _snack('Could not connect: ${_errorText(e)}');
     }
