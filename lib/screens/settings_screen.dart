@@ -22,6 +22,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // 'gemini', 'claude', 'ocr'
   late String _selectedAi;
 
+  // Printer model id from PrinterModels.all
+  late String _printerModel;
+
   final _printer = PrinterService();
   bool _busy = false;
   bool _connected = false;
@@ -34,6 +37,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _geminiCtrl = TextEditingController(text: widget.prefs.getString('gemini_api_key') ?? '');
     _claudeCtrl = TextEditingController(text: widget.prefs.getString('claude_api_key') ?? '');
     _selectedAi = widget.prefs.getString('selected_ai') ?? 'ocr';
+    _printerModel =
+        widget.prefs.getString(PrinterModels.prefKey) ?? PrinterModels.defaultId;
     _refreshConnection();
   }
 
@@ -62,6 +67,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ── Printer ────────────────────────────────────────────────────────────
+  Future<void> _selectPrinterModel(String id) async {
+    if (id == _printerModel) return;
+    setState(() {
+      _printerModel = id;
+      _connected = false;
+      _printerStatus = '';
+    });
+    // Persists the pref and swaps the driver (disconnecting the old one).
+    await _printer.selectModel(id);
+    _refreshConnection();
+  }
+
   Future<void> _connectPrinter() async {
     if (!await PrinterService.ensurePermissions()) {
       _snack('Bluetooth permission is required to connect to a printer.');
@@ -83,7 +100,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (devices.isEmpty) {
       setState(() => _printerStatus = '');
-      _snack('No paired printers found. Pair your RP4B in Android Bluetooth Settings first, then come back here.');
+      _snack('No paired printers found. Pair your '
+          '${PrinterModels.byId(_printerModel).name} in Android Bluetooth '
+          'Settings first, then come back here.');
       return;
     }
 
@@ -255,12 +274,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             const SizedBox(height: 16),
 
-            // --- Printer ---
-            _sectionTitle('Bluetooth Printer (Honeywell RP4B)'),
+            // --- Printer model ---
+            _sectionTitle('Printer Model'),
             const Text(
-              'Pair your RP4B in Android Bluetooth Settings first, '
-              'then tap Connect to select it here.',
+              'Each model uses its own label format, so pick the printer '
+              'you are using.',
               style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            ...PrinterModels.all.map(_printerModelTile),
+
+            const SizedBox(height: 28),
+            const Divider(),
+            const SizedBox(height: 16),
+
+            // --- Printer connection ---
+            _sectionTitle('Bluetooth Printer'),
+            Text(
+              'Pair your ${PrinterModels.byId(_printerModel).name} in Android '
+              'Bluetooth Settings first, then tap Connect to select it here.',
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
             ),
             const SizedBox(height: 10),
             Row(
@@ -457,6 +490,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+
+  Widget _printerModelTile(PrinterModelInfo model) {
+    final selected = _printerModel == model.id;
+    return GestureDetector(
+      onTap: () => _selectPrinterModel(model.id),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: selected ? const Color(0xFF1565C0) : Colors.grey.shade300,
+            width: selected ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(10),
+          color: selected ? const Color(0xFF1565C0).withOpacity(0.05) : Colors.white,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Icon(Icons.print,
+                  color: selected ? const Color(0xFF1565C0) : Colors.grey,
+                  size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(model.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: selected ? const Color(0xFF1565C0) : Colors.black87,
+                        )),
+                    Text(model.description,
+                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              Radio<String>(
+                value: model.id,
+                groupValue: _printerModel,
+                onChanged: (v) => _selectPrinterModel(v!),
+                activeColor: const Color(0xFF1565C0),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _sectionTitle(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 6),

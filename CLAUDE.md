@@ -58,12 +58,18 @@ e.g. prefix `AU` + tracking `123456789012345` + carton `15/17` → `AU1234567890
 
 ### Printing
 
-The HPRT HM-T3 Pro prints from **ZPL only** over **Bluetooth Classic SPP (RFCOMM)** — it silently ignores ESC/POS and CPCL, and BLE is not used. The print path has three layers:
+The app supports multiple printer models. Each model speaks its own format, so each has a **driver**; the user picks the model in `SettingsScreen` (pref `printer_model`). All current printers connect over **Bluetooth Classic SPP (RFCOMM)** via `flutter_bluetooth_serial`; the printer must be **paired in Android Settings** first — the app connects to bonded devices, it does not pair or scan.
 
-- **`lib/printing/zpl_builder.dart`** — pure-Dart ZPL generator. `parcelLabel()` builds the 30×75 mm label (tracking text + QR + address + carton count); `minimalTest()` is a diagnostic label for verifying the link. Coordinates are in dots (203 dpi, 8 dots/mm); label is 240×600 dots.
-- **`lib/printing/printer_service.dart`** — Dart-side `PrinterService`. Lists bonded devices, connects, prints (ZPL as UTF-8 bytes), all via a `MethodChannel`. `printParcelLabel` concatenates the label N times for copies.
-- **`android/.../HprtPrinterChannel.kt`** — native Kotlin handler for the `hprt_printer` channel. Opens a plain `BluetoothSocket` (SPP UUID `00001101-...`) to a *bonded* device, streams bytes in 2 KB chunks with a 20 ms inter-chunk delay. All calls run off the main thread. **The socket is process-wide native state**, so a printer connected from `SettingsScreen` is the same connection `LabelScreen` prints with — `PrinterService.isConnected()` (a native query) is the source of truth, not any Dart-side flag.
+Layers in `lib/printing/`:
 
-The printer must be **paired in Android Settings** first; the app connects to bonded devices, it does not pair or scan. `LabelScreen` also offers a PDF path (`Printing.layoutPdf`) — a 30×75 mm `pdf` document through the system print dialog, independent of the Bluetooth printer.
+- **`printer_driver.dart`** — `PrinterDriver` interface (`scanDevices` / `connect` / `printLabel` / `printTest` / `printRaw`) and `PrinterDevice`.
+- **`drivers/spp_printer_driver.dart`** — base class owning the SPP connection; subclasses implement the print methods and may override `onConnected()` for a post-connect handshake.
+- **`drivers/hprt_zpl_driver.dart`** — HPRT HM-T3 Pro. Prints from **ZPL only** (ESC/POS and CPCL silently dropped); label built by `zpl_builder.dart` (75×50 mm gapped stock, 203 dpi, 576-dot head, CRLF + `^MNY` per the proven test app at `~/work/ninjavan/hprt`).
+- **`drivers/honeywell_cpcl_driver.dart`** — Honeywell RP4B. CPCL via `cpcl_builder.dart` (100×150 mm portrait, 200 dpi).
+- **`drivers/paperang_p1_driver.dart`** — Paperang P1. No printer language: the label is rasterized by `label_rasterizer.dart` to a 384-dot-wide 1-bit image and streamed in framed packets built by `paperang_protocol.dart` (port of the proven Kotlin client at `~/work/ninjavan/paperang`). Connect handshake: register session CRC key, then set heat density — both required, or prints come out blank/garbled.
+- **`printer_models.dart`** — registry mapping model id → display name → driver factory. **To add a printer: write a driver + add a registry entry**; Settings and `PrinterService` pick it up automatically.
+- **`printer_service.dart`** — `PrinterService`, a **singleton facade** used by all screens. It instantiates the driver for the selected model (lazily, swapping/disconnecting when the pref changes) and delegates everything. Because it is a singleton, a printer connected from `SettingsScreen` is the same connection `LabelScreen` prints with.
 
-The label layout is rendered independently in three places — `ZplBuilder.parcelLabel` (printed output), `LabelScreen._buildLabelPreview` (on-screen preview), and `LabelScreen._printToPdf` (PDF). A layout change must be applied to all three. The ZPL dot coordinates are tuned for 30×75 mm stock and may need adjustment on real hardware.
+`LabelScreen` also offers a PDF path (`Printing.layoutPdf`) — a 100×150 mm `pdf` document through the system print dialog, independent of the Bluetooth printer.
+
+The label layout is rendered independently in several places — `ZplBuilder.parcelLabel`, `CpclBuilder.parcelLabel`, `LabelRasterizer.renderParcelLabel` (per-printer output), `LabelScreen._buildLabelPreview` (on-screen preview), and `LabelScreen._printToPdf` (PDF). A layout change must be applied to all of them. Dot coordinates are tuned per stock size and may need adjustment on real hardware.

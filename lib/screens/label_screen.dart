@@ -128,7 +128,7 @@ class _LabelScreenState extends State<LabelScreen> {
 
     if (devices.isEmpty) {
       setState(() => _printerStatus = 'No paired printers found');
-      _snack('No paired printers found. Pair your RP4B in Android Bluetooth Settings first.');
+      _snack('No paired printers found. Pair your printer in Android Bluetooth Settings first.');
       return;
     }
 

@@ -1,111 +1,100 @@
 import 'dart:typed_data';
 
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'cpcl_builder.dart';
+import 'printer_driver.dart';
+import 'printer_models.dart';
 
-/// A paired Bluetooth device.
-class PrinterDevice {
-  final String name;
-  final String address;
+export 'printer_driver.dart' show PrinterDevice;
+export 'printer_models.dart';
 
-  const PrinterDevice({required this.name, required this.address});
-}
-
-/// Drives a Honeywell RP4B thermal printer over Bluetooth Classic (SPP).
+/// Facade over the per-model printer drivers (see `printer_models.dart`).
 ///
-/// The device must be paired in Android Bluetooth Settings before use.
-/// Connect flow: scanDevices() → connect(device) → printLabel(...).
+/// A singleton: every screen that constructs `PrinterService()` gets the same
+/// instance, so a printer connected in Settings is the same connection
+/// LabelScreen prints with. The active driver follows the `printer_model`
+/// preference; switching models disconnects the old driver.
 class PrinterService {
-  BluetoothConnection? _connection;
-  String? _connectedName;
+  PrinterService._();
+  static final PrinterService _instance = PrinterService._();
+  factory PrinterService() => _instance;
 
-  String get connectedName => _connectedName ?? '';
+  PrinterDriver? _driver;
+  String _modelId = '';
+
+  String get connectedName => _driver?.connectedName ?? '';
 
   // ── Permissions ──────────────────────────────────────────────────────────
 
   static Future<bool> ensurePermissions() async {
     final statuses = await [
       Permission.bluetoothConnect,
+      Permission.bluetoothScan,
     ].request();
     return statuses.values.every((s) => s.isGranted);
+  }
+
+  // ── Model selection ──────────────────────────────────────────────────────
+
+  /// Driver for the currently selected `printer_model` pref, swapping (and
+  /// disconnecting) if the selection changed since last use.
+  Future<PrinterDriver> _activeDriver() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString(PrinterModels.prefKey) ?? PrinterModels.defaultId;
+    if (_driver == null || id != _modelId) {
+      await _driver?.disconnect();
+      _modelId = id;
+      _driver = PrinterModels.byId(id).createDriver();
+    }
+    return _driver!;
+  }
+
+  /// Persists the model choice and swaps the active driver.
+  Future<void> selectModel(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(PrinterModels.prefKey, id);
+    await _activeDriver();
   }
 
   // ── Device list ──────────────────────────────────────────────────────────
 
   /// Returns devices already paired in Android Bluetooth Settings.
-  Future<List<PrinterDevice>> scanDevices() async {
-    final paired = await FlutterBluetoothSerial.instance.getBondedDevices();
-    return paired
-        .map((d) => PrinterDevice(
-              name: d.name?.isNotEmpty == true ? d.name! : d.address,
-              address: d.address,
-            ))
-        .toList();
-  }
+  Future<List<PrinterDevice>> scanDevices() async =>
+      (await _activeDriver()).scanDevices();
 
   /// Alias kept for compatibility with existing screen code.
   Future<List<PrinterDevice>> pairedPrinters() => scanDevices();
 
   // ── Connection ───────────────────────────────────────────────────────────
 
-  Future<bool> isConnected() async => _connection?.isConnected ?? false;
+  Future<bool> isConnected() async => (await _activeDriver()).isConnected();
 
-  /// Connects to [printer] via Bluetooth Classic SPP.
-  Future<void> connect(PrinterDevice printer) async {
-    await disconnect();
-    _connection = await BluetoothConnection.toAddress(printer.address);
-    _connectedName = printer.name;
-  }
+  Future<void> connect(PrinterDevice printer) async =>
+      (await _activeDriver()).connect(printer);
 
-  Future<void> disconnect() async {
-    try {
-      await _connection?.finish();
-    } catch (_) {}
-    _connection = null;
-    _connectedName = null;
-  }
+  Future<void> disconnect() async => _driver?.disconnect();
 
   // ── Printing ─────────────────────────────────────────────────────────────
 
-  Future<void> _send(String cpcl) async {
-    if (_connection == null || !(_connection!.isConnected)) {
-      throw Exception('Not connected to a printer.');
-    }
-    _connection!.output.add(Uint8List.fromList(cpcl.codeUnits));
-    await _connection!.output.allSent;
-  }
-
-  /// Prints a parcel label via CPCL.
+  /// Prints the parcel label in the selected printer's native format.
   Future<void> printLabel({
     required String trackingNumber,
     required List<String> addressLines,
     required String cartonDisplay,
     int copies = 1,
-  }) async {
-    final cpcl = CpclBuilder.parcelLabel(
-      trackingNumber: trackingNumber,
-      addressLines: addressLines,
-      cartonDisplay: cartonDisplay,
-    );
-    for (int i = 0; i < copies.clamp(1, 99); i++) {
-      await _send(cpcl);
-      if (copies > 1 && i < copies - 1) {
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-    }
-  }
+  }) async =>
+      (await _activeDriver()).printLabel(
+        trackingNumber: trackingNumber,
+        addressLines: addressLines,
+        cartonDisplay: cartonDisplay,
+        copies: copies,
+      );
 
-  /// Sends a minimal CPCL test label to verify the connection.
-  Future<void> printTest() async => _send(CpclBuilder.testLabel());
+  /// Prints a minimal test label to verify the link.
+  Future<void> printTest() async => (await _activeDriver()).printTest();
 
   /// Sends raw bytes — used by print-language test buttons.
-  Future<void> printRaw(Uint8List bytes) async {
-    if (_connection == null || !(_connection!.isConnected)) {
-      throw Exception('Not connected to a printer.');
-    }
-    _connection!.output.add(bytes);
-    await _connection!.output.allSent;
-  }
+  Future<void> printRaw(Uint8List bytes) async =>
+      (await _activeDriver()).printRaw(bytes);
 }
