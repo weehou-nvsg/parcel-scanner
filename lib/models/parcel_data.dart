@@ -14,7 +14,7 @@ class ParcelData {
   });
 
   String get newTrackingNumber =>
-      '$prefix$trackingNumber$cartonCurrent-$cartonTotal';
+      '$prefix$trackingNumber-$cartonCurrent';
 
   String get cartonDisplay => '$cartonCurrent/$cartonTotal';
 

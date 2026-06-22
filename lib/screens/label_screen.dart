@@ -253,6 +253,7 @@ class _LabelScreenState extends State<LabelScreen> {
       pageFormat: const PdfPageFormat(labelW, labelH,
           marginAll: 3 * PdfPageFormat.mm),
       build: (ctx) => pw.Column(
+        mainAxisAlignment: pw.MainAxisAlignment.center,
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
           pw.Center(
@@ -263,25 +264,10 @@ class _LabelScreenState extends State<LabelScreen> {
               height: qrSize,
             ),
           ),
-          pw.SizedBox(height: 3 * PdfPageFormat.mm),
-          pw.Text('NEW TRACKING:',
-              style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600)),
-          pw.SizedBox(height: 1),
+          pw.SizedBox(height: 6 * PdfPageFormat.mm),
           pw.Text(parcel.newTrackingNumber,
-              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 3 * PdfPageFormat.mm),
-          pw.Text('DELIVER TO:',
-              style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600)),
-          pw.SizedBox(height: 1),
-          ...parcel.addressLines
-              .map((l) => pw.Text(l, style: pw.TextStyle(fontSize: 7))),
-          pw.Spacer(),
-          pw.Divider(thickness: 0.5),
-          pw.Text('CARTON:',
-              style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600)),
-          pw.Text(parcel.cartonDisplay,
-              style: pw.TextStyle(
-                  fontSize: 28, fontWeight: pw.FontWeight.bold)),
+              style:
+                  pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
         ],
       ),
     ));
@@ -404,7 +390,7 @@ class _LabelScreenState extends State<LabelScreen> {
     // 100 mm × 150 mm portrait → aspect ratio 2:3
     final w = MediaQuery.of(context).size.width - 32;
     final h = w * 150 / 100;
-    final qrSize = w * 0.78; // QR takes 78% of label width
+    final qrSize = w * 0.72; // QR centred with a safety margin
 
     return Container(
       width: w,
@@ -421,40 +407,24 @@ class _LabelScreenState extends State<LabelScreen> {
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Large QR code
+            // Large, centred QR code
             QrImageView(
               data: parcel.newTrackingNumber,
               version: QrVersions.auto,
               size: qrSize,
               backgroundColor: Colors.white,
             ),
-            const SizedBox(height: 4),
-            const Text('NEW TRACKING:',
-                style: TextStyle(fontSize: 7, color: Colors.grey)),
+            const SizedBox(height: 16),
             Text(parcel.newTrackingNumber,
                 style: const TextStyle(
-                    fontSize: 10,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                     fontFamily: 'monospace'),
                 textAlign: TextAlign.center,
                 softWrap: true),
-            const SizedBox(height: 4),
-            const Text('DELIVER TO:',
-                style: TextStyle(fontSize: 7, color: Colors.grey)),
-            ...parcel.addressLines.map((line) => Text(line,
-                style: const TextStyle(fontSize: 8, fontFamily: 'monospace'),
-                overflow: TextOverflow.ellipsis)),
-            const Spacer(),
-            const Divider(height: 6, thickness: 1),
-            const Text('CARTON:',
-                style: TextStyle(fontSize: 7, color: Colors.grey)),
-            Text(parcel.cartonDisplay,
-                style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace')),
           ],
         ),
       ),

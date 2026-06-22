@@ -15,13 +15,9 @@ class ZplBuilder {
   static const int labelWidth  = 576;
   static const int labelLength = 400; // 50 mm × 8 dots/mm
 
-  // QR column: x=8, QR occupies ~270 dots wide (magnification 9, version 3–4).
-  // Text column starts at x=_textX with _textW dots of usable width.
-  static const int _textX  = 285;
-  static const int _textW  = labelWidth - _textX - 8; // ≈ 283 dots
-
-  /// The parcel label: large QR code on the left, tracking number, delivery
-  /// address, and carton count stacked in the right column.
+  /// The parcel label — only the new tracking number: a large, centred QR with
+  /// the tracking number in big text underneath. The address/carton arguments
+  /// are accepted for a uniform driver interface but intentionally not printed.
   /// Mirrors the on-screen preview and the PDF output.
   static String parcelLabel({
     required String trackingNumber,
@@ -29,8 +25,10 @@ class ZplBuilder {
     required String cartonDisplay,
   }) {
     final tracking = _sanitize(trackingNumber);
-    final address  = addressLines.take(3).map(_sanitize).join(r'\&');
-    final carton   = _sanitize(cartonDisplay);
+
+    // Magnification 9 ≈ 33–37 mm square; qrX centres the typical (version 2–3)
+    // code on the 576-dot head so it can't clip at the paper edge.
+    const qrX = 165;
 
     return '^XA\r\n'
         '^CI28\r\n'
@@ -38,18 +36,10 @@ class ZplBuilder {
         '^LL$labelLength\r\n'
         '^LH0,0\r\n'
         '^MNY\r\n' // gapped label stock (use ^MNN for continuous)
-        // ── QR code — dominant left side, magnification 9 ≈ 33–37 mm square ──
-        '^FO8,8^BQN,2,9^FDMA,$tracking^FS\r\n'
-        // ── Right column: tracking number ──
-        '^FO$_textX,8^A0N,15,15^FDNEW TRACKING:^FS\r\n'
-        '^FO$_textX,27^A0N,19,19^FB$_textW,3,2,L^FD$tracking^FS\r\n'
-        // ── Delivery address ──
-        '^FO$_textX,115^A0N,15,15^FDDELIVER TO:^FS\r\n'
-        '^FO$_textX,134^A0N,17,17^FB$_textW,4,2,L^FD$address^FS\r\n'
-        // ── Divider + carton count ──
-        '^FO$_textX,300^GB$_textW,2,2^FS\r\n'
-        '^FO$_textX,308^A0N,14,14^FDCARTON:^FS\r\n'
-        '^FO$_textX,326^A0N,60,60^FD$carton^FS\r\n'
+        // ── Large, centred QR code ──
+        '^FO$qrX,10^BQN,2,9^FDMA,$tracking^FS\r\n'
+        // ── Tracking number — big, centred across the full width ──
+        '^FO0,300^A0N,40,40^FB$labelWidth,2,0,C^FD$tracking^FS\r\n'
         '^XZ\r\n';
   }
 

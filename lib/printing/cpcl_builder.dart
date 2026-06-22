@@ -2,51 +2,40 @@
 ///
 /// Label size: 100 mm wide × 150 mm tall (portrait).
 /// Resolution: 200 DPI (CPCL standard unit).
-/// Layout: large QR code at top, tracking + address + carton below.
+/// Layout: large centred QR code with the tracking number in big text below.
 class CpclBuilder {
   static const int _dpi         = 200;
-  static const int _widthDots   = 800;   // 100 mm × 8 dots/mm
   static const int _heightDots  = 1200;  // 150 mm × 8 dots/mm
 
-  /// Full parcel label — QR dominant at top, text info below.
+  /// Parcel label — only the new tracking number: a large, centred QR with the
+  /// tracking number in big text underneath. The address/carton arguments are
+  /// accepted for a uniform driver interface but intentionally not printed.
   static String parcelLabel({
     required String trackingNumber,
     required List<String> addressLines,
     required String cartonDisplay,
   }) {
-    final t  = _sanitize(trackingNumber);
-    final a1 = addressLines.isNotEmpty     ? _sanitize(addressLines[0]) : '';
-    final a2 = addressLines.length > 1     ? _sanitize(addressLines[1]) : '';
-    final a3 = addressLines.length > 2     ? _sanitize(addressLines[2]) : '';
-    final c  = _sanitize(cartonDisplay);
+    final t = _sanitize(trackingNumber);
 
-    // QR module width 18 → ~65–74 mm square, centred on 800-dot wide label.
-    // Printer auto-selects version; M = medium error correction.
+    // QR module width 18 → large square. CENTER makes the QR (and the text)
+    // auto-centre on the 800-dot label regardless of QR version, so a short
+    // code can't drift to the edge and clip.
     const qrMod = 18;
-    const qrX   = 103;  // (800 − 594) / 2  ≈ centred for version-4 QR
-    const qrY   = 30;
+    const qrY   = 100;
 
     final sb = StringBuffer();
     sb.writeln('! 0 $_dpi $_dpi $_heightDots 1');
-    // Large QR code
-    sb.writeln('BARCODE QR $qrX $qrY M $qrMod');
+    sb.writeln('CENTER');
+    // Large, centred QR code
+    sb.writeln('BARCODE QR 0 $qrY M $qrMod');
     sb.writeln('MA,M');
     sb.writeln(t);
     sb.writeln('ENDQR');
-    // Tracking number
-    sb.writeln('TEXT 4 0 20 660 NEW TRACKING:');
-    sb.writeln('TEXT 7 0 20 690 $t');
-    // Delivery address
-    sb.writeln('TEXT 4 0 20 770 DELIVER TO:');
-    if (a1.isNotEmpty) sb.writeln('TEXT 4 0 20 800 $a1');
-    if (a2.isNotEmpty) sb.writeln('TEXT 4 0 20 830 $a2');
-    if (a3.isNotEmpty) sb.writeln('TEXT 4 0 20 860 $a3');
-    // Carton count — large text
-    sb.writeln('LINE 20 920 780 920 2');
-    sb.writeln('TEXT 4 0 20 930 CARTON:');
-    sb.writeln('SETMAG 3 3');
-    sb.writeln('TEXT 7 0 20 960 $c');
+    // Tracking number — large and centred, below the QR
+    sb.writeln('SETMAG 2 2');
+    sb.writeln('TEXT 7 0 0 760 $t');
     sb.writeln('SETMAG 1 1');
+    sb.writeln('LEFT');
     sb.writeln('FORM');
     sb.writeln('PRINT');
     return sb.toString();

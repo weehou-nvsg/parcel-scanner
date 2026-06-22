@@ -59,14 +59,11 @@ class LabelRasterizer {
       )..layout(maxWidth: maxTextWidth);
     }
 
-    final trackingHeader = text('NEW TRACKING:', size: 16);
+    // Only the new tracking number is printed — big and bold under the QR.
+    // The address/carton arguments are accepted for a uniform interface but
+    // intentionally not drawn.
     final tracking = text(trackingNumber,
-        size: 24, weight: FontWeight.bold, family: 'monospace');
-    final deliverHeader = text('DELIVER TO:', size: 16);
-    final address =
-        addressLines.take(4).map((l) => text(l, size: 20)).toList();
-    final cartonHeader = text('CARTON:', size: 16);
-    final carton = text(cartonDisplay, size: 56, weight: FontWeight.bold);
+        size: 30, weight: FontWeight.bold, family: 'monospace');
 
     // QR with an integer dots-per-module size so modules stay crisp.
     final qrCode = QrCode.fromData(
@@ -80,13 +77,7 @@ class LabelRasterizer {
     final qrX = ((width - qrSize) / 2).floorToDouble();
 
     var height = _margin + qrSize + _gap;
-    height += trackingHeader.height + 2 + tracking.height + _gap;
-    height += deliverHeader.height + 2;
-    for (final a in address) {
-      height += a.height;
-    }
-    height += _gap + 2 + 6; // divider
-    height += cartonHeader.height + 2 + carton.height + _margin;
+    height += tracking.height + _margin;
     final heightPx = height.ceil();
 
     final recorder = ui.PictureRecorder();
@@ -116,19 +107,7 @@ class LabelRasterizer {
       y += t.height;
     }
 
-    drawCentered(trackingHeader);
-    y += 2;
     drawCentered(tracking);
-    y += _gap;
-    drawCentered(deliverHeader);
-    y += 2;
-    address.forEach(drawCentered);
-    y += _gap;
-    canvas.drawRect(Rect.fromLTWH(_margin, y, maxTextWidth, 2), black);
-    y += 8;
-    drawCentered(cartonHeader);
-    y += 2;
-    drawCentered(carton);
 
     return recorder.endRecording().toImage(width, heightPx);
   }
