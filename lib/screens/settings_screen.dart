@@ -216,7 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _sectionTitle('Tracking Number Prefix'),
             const Text(
               'Prepended to every tracking number.\n'
-              'e.g. prefix "AU" + tracking "123456" + carton "2/5" → "AU1234562/5"',
+              'e.g. prefix "AU" + tracking "123456" + carton "2" → "AU123456-2"',
               style: TextStyle(color: Colors.grey, fontSize: 13),
             ),
             const SizedBox(height: 10),

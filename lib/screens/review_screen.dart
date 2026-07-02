@@ -76,13 +76,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
-  String get _previewTracking {
-    final p = _prefixCtrl.text.trim();
-    final t = _trackingCtrl.text.trim();
-    final a = _cartonCurrentCtrl.text.trim();
-    final b = _cartonTotalCtrl.text.trim();
-    return '$p$t$a-$b';
-  }
+  String get _previewTracking => _buildParcel().newTrackingNumber;
 
   // ── OCR picker helpers ──────────────────────────────────────────────────────
 
