@@ -21,11 +21,12 @@ class GeminiResult {
 class GeminiService {
   final String apiKey;
 
-  // Uses the stable v1 REST endpoint — avoids the v1beta package limitation
-  // where gemini-1.5-flash is not resolvable.
+  // v1beta REST endpoint — required for generationConfig.thinkingConfig,
+  // which turns off 2.5-flash thinking (seconds of extra latency the simple
+  // field extraction below does not need).
   static const _model = 'gemini-2.5-flash';
   static const _endpoint =
-      'https://generativelanguage.googleapis.com/v1/models/$_model:generateContent';
+      'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent';
 
   GeminiService(this.apiKey);
 
@@ -75,9 +76,12 @@ Rules:
               {'text': prompt},
             ]
           }
-        ]
+        ],
+        'generationConfig': {
+          'thinkingConfig': {'thinkingBudget': 0},
+        },
       }),
-    );
+    ).timeout(const Duration(seconds: 20));
 
     if (response.statusCode != 200) {
       throw Exception('Gemini API error ${response.statusCode}: ${response.body}');

@@ -51,6 +51,10 @@ class _ScanScreenState extends State<ScanScreen> {
     final picked = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 90,
+      // Labels read fine at this size; full-resolution photos make the
+      // base64 upload to Claude/Gemini several times slower.
+      maxWidth: 1600,
+      maxHeight: 1600,
     );
     if (picked == null) return;
     await _processFile(picked.path);
@@ -82,6 +86,21 @@ class _ScanScreenState extends State<ScanScreen> {
       String rawText = '';
       List<String> ocrTokens = [];
 
+      // Start on-device OCR immediately so it runs while any AI request is in
+      // flight: AI failure falls back instantly, and the review-screen pickers
+      // get tokens even when AI succeeds.
+      final ocrFuture = _ocr.processImage(filePath);
+
+      Future<void> useOcrResult() async {
+        final result = await ocrFuture;
+        trackingNumber = result.trackingNumber;
+        cartonCurrent = result.cartonCurrent;
+        cartonTotal = result.cartonTotal;
+        addressLines = result.addressLines;
+        rawText = result.rawText;
+        ocrTokens = result.allTokens;
+      }
+
       if (selectedAi == 'gemini' && geminiKey.isNotEmpty) {
         setState(() => _status = 'Analysing with Gemini AI...');
         try {
@@ -91,6 +110,7 @@ class _ScanScreenState extends State<ScanScreen> {
           cartonTotal = result.cartonTotal;
           addressLines = result.addressLines;
           rawText = result.rawResponse;
+          try { ocrTokens = (await ocrFuture).allTokens; } catch (_) {}
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -100,13 +120,7 @@ class _ScanScreenState extends State<ScanScreen> {
             ));
           }
           setState(() => _status = 'Gemini failed — using on-device OCR...');
-          final result = await _ocr.processImage(filePath);
-          trackingNumber = result.trackingNumber;
-          cartonCurrent = result.cartonCurrent;
-          cartonTotal = result.cartonTotal;
-          addressLines = result.addressLines;
-          rawText = result.rawText;
-          ocrTokens = result.allTokens;
+          await useOcrResult();
         }
       } else if (selectedAi == 'claude' && claudeKey.isNotEmpty) {
         setState(() => _status = 'Analysing with Claude AI...');
@@ -117,6 +131,7 @@ class _ScanScreenState extends State<ScanScreen> {
           cartonTotal = result.cartonTotal;
           addressLines = result.addressLines;
           rawText = result.rawResponse;
+          try { ocrTokens = (await ocrFuture).allTokens; } catch (_) {}
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -126,23 +141,11 @@ class _ScanScreenState extends State<ScanScreen> {
             ));
           }
           setState(() => _status = 'Claude failed — using on-device OCR...');
-          final result = await _ocr.processImage(filePath);
-          trackingNumber = result.trackingNumber;
-          cartonCurrent = result.cartonCurrent;
-          cartonTotal = result.cartonTotal;
-          addressLines = result.addressLines;
-          rawText = result.rawText;
-          ocrTokens = result.allTokens;
+          await useOcrResult();
         }
       } else {
         setState(() => _status = 'Reading label...');
-        final result = await _ocr.processImage(filePath);
-        trackingNumber = result.trackingNumber;
-        cartonCurrent = result.cartonCurrent;
-        cartonTotal = result.cartonTotal;
-        addressLines = result.addressLines;
-        rawText = result.rawText;
-        ocrTokens = result.allTokens;
+        await useOcrResult();
       }
 
       if (!mounted) return;

@@ -81,7 +81,7 @@ Rules:
           }
         ],
       }),
-    );
+    ).timeout(const Duration(seconds: 20));
 
     if (response.statusCode != 200) {
       throw Exception('Claude API error ${response.statusCode}: ${response.body}');
